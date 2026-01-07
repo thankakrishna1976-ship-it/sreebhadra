@@ -88,11 +88,6 @@ def get_supabase_df(table_name, select="*"):
 def get_data(table_name, select="*"):
     return get_supabase_df(table_name, select)
 
-def run_query(query_str):
-    # This is a fallback for legacy code calling raw SQL strings, 
-    # though with Supabase we prefer the wrappers above.
-    st.warning("Executing raw query on Cloud DB not recommended. Update to Supabase wrappers.")
-
 # --- UTILITY FUNCTIONS ---
 
 def get_base64_of_bin_file(bin_file):
@@ -457,9 +452,7 @@ elif st.session_state.current_page == "Enroll":
                 
                 if st.button("🚀 Process Bulk Upload"):
                     success_count = 0
-                    # Group by family tag to process as units
                     for tag, group in bulk_df.groupby('family_tag'):
-                        # Process Head first
                         head_mask = group['relationship'].str.lower() == 'head'
                         if not head_mask.any():
                             st.error(f"Error: Family Tag '{tag}' has no 'Head' defined. Skipping.")
@@ -481,8 +474,6 @@ elif st.session_state.current_page == "Enroll":
                         if h_res and h_res.data:
                             new_family_id = h_res.data[0]['id']
                             success_count += 1
-                            
-                            # Process Members
                             members_rows = group[~head_mask]
                             for _, m_row in members_rows.iterrows():
                                 m_data = {
@@ -497,7 +488,6 @@ elif st.session_state.current_page == "Enroll":
                                     "yearly_pooja_date": str(m_row['yearly_pooja_date']) if m_row['yearly_pooja_date'] else None
                                 }
                                 run_supabase_insert("members", m_data)
-                    
                     st.success(f"Successfully uploaded {success_count} families!")
             except Exception as e:
                 st.error(f"Failed to process file: {e}")
@@ -511,32 +501,43 @@ elif st.session_state.current_page == "Search":
     if not df.empty:
         if search_term:
             df = df[df['head_name'].str.contains(search_term, case=False, na=False) | df['phone'].str.contains(search_term, na=False)]
-        for idx, row in df.iterrows():
-            with st.container():
-                c_img, c_detail = st.columns([1, 6])
-                with c_img:
-                    img_data = base64_to_image(row['photo'])
-                    if img_data: st.image(img_data, width=100)
-                    else: st.markdown("👤")
-                with c_detail:
-                    st.subheader(row['head_name'])
-                    st.write(f"📞 {row['phone']} | ⭐ {row['natchathiram'] or 'N/A'}")
-                    with st.expander("⚙️ Manage Account"):
-                        st.write("👨‍👩‍👧 **Family Members**")
-                        members = get_data("members")
-                        if not members.empty:
-                            fam_m = members[members['family_id'] == row['id']]
-                            for _, m in fam_m.iterrows():
-                                col_m1, col_m2 = st.columns([4, 1])
-                                col_m1.write(f"- {m['member_name']} ({m['relationship']})")
-                                if col_m2.button("🗑️", key=f"del_mem_{m['id']}"):
-                                    run_supabase_delete("members", m['id'])
-                                    st.rerun()
-                        st.divider()
-                        st.write("🗑️ **Danger Zone**")
-                        if st.button(f"Delete Account: {row['head_name']}", key=f"del_{row['id']}"):
-                            run_supabase_delete("families", row['id'])
-                            st.rerun()
+        
+        if df.empty:
+            st.info("No matching devotees found.")
+        else:
+            for idx, row in df.iterrows():
+                with st.container():
+                    c_img, c_detail = st.columns([1, 6])
+                    with c_img:
+                        img_data = base64_to_image(row['photo'])
+                        if img_data: st.image(img_data, width=100)
+                        else: st.markdown("👤")
+                    with c_detail:
+                        st.subheader(row['head_name'])
+                        st.write(f"📞 {row['phone']} | ⭐ {row['natchathiram'] or 'N/A'}")
+                        with st.expander("⚙️ Manage Account"):
+                            st.write("👨‍👩‍👧 **Family Members**")
+                            members = get_data("members")
+                            if not members.empty:
+                                fam_m = members[members['family_id'] == row['id']]
+                                if fam_m.empty:
+                                    st.write("No members added.")
+                                else:
+                                    for _, m in fam_m.iterrows():
+                                        col_m1, col_m2 = st.columns([4, 1])
+                                        col_m1.write(f"- {m['member_name']} ({m['relationship']})")
+                                        if col_m2.button("🗑️", key=f"del_mem_{m['id']}"):
+                                            run_supabase_delete("members", m['id'])
+                                            st.rerun()
+                            
+                            st.divider()
+                            st.write("🗑️ **Danger Zone**")
+                            if st.button(f"Delete Account: {row['head_name']}", key=f"del_{row['id']}"):
+                                supabase.table("members").delete().eq("family_id", row['id']).execute()
+                                run_supabase_delete("families", row['id'])
+                                st.rerun()
+    else:
+        st.info("Enrollment database is empty.")
 
 elif st.session_state.current_page == "Billing":
     page_header()
@@ -554,6 +555,8 @@ elif st.session_state.current_page == "Billing":
                 dev = fam_list[sel_f]
                 selected_name, selected_id = dev['head_name'], dev['id']
                 selected_wa = str(dev['whatsapp']).strip() if str(dev['whatsapp']).strip() else str(dev['phone']).strip()
+            else:
+                st.warning("Enroll a devotee first.")
         else:
             selected_name = st.text_input("Guest Name *")
             selected_wa = st.text_input("Guest WhatsApp No.")
@@ -566,21 +569,67 @@ elif st.session_state.current_page == "Billing":
             man_no = st.text_input("Manual Bill No."); book_no = st.text_input("Bill Book No.")
             
             if st.button("Generate Receipt"):
-                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                data = {"family_id": selected_id, "service_id": service['id'], "amount": service['price'], "date": now, "manual_bill_no": man_no, "bill_book_no": book_no, "guest_name": selected_name if selected_id == 0 else "", "guest_whatsapp": selected_wa}
-                res = run_supabase_insert("transactions", data)
-                if res and res.data:
-                    last_id = res.data[0]['id']
-                    pdf = generate_pdf(last_id, selected_name, "", sel_s, service['price'], now, man_no, book_no)
-                    st.success("Receipt generated successfully!")
-                    col_dl1, col_dl2 = st.columns(2)
-                    with col_dl1: st.download_button("📥 Download PDF Receipt", pdf, f"Receipt_{last_id}.pdf", "application/pdf")
-                    if selected_wa:
-                        msg = f"🙏 *{TEMPLE_NAME_FULL}*\n\nNamaste *{selected_name}*,\nReceipt: *#{last_id}*\nManual No: *{man_no}*\nBook No: *{book_no}*\nService: *{sel_s}*\nAmount: *₹{service['price']:,.2f}*\nDate: *{now}*"
-                        clean_wa = "".join(filter(str.isdigit, str(selected_wa)))
-                        if len(clean_wa) == 10: clean_wa = "91" + clean_wa
-                        encoded_msg = msg.replace(' ', '%20').replace('\n', '%0A').replace('#', '%23').replace('*', '%2A')
-                        with col_dl2: st.link_button("📲 Send WhatsApp", f"https://wa.me/{clean_wa}?text={encoded_msg}")
+                if billing_mode == "Guest Devotee" and not selected_name:
+                    st.error("Enter Guest Name.")
+                else:
+                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    data = {"family_id": selected_id, "service_id": service['id'], "amount": service['price'], "date": now, "manual_bill_no": man_no, "bill_book_no": book_no, "guest_name": selected_name if selected_id == 0 else "", "guest_whatsapp": selected_wa}
+                    res = run_supabase_insert("transactions", data)
+                    if res and res.data:
+                        last_id = res.data[0]['id']
+                        pdf = generate_pdf(last_id, selected_name, "", sel_s, service['price'], now, man_no, book_no)
+                        st.success("Receipt generated successfully!")
+                        col_dl1, col_dl2 = st.columns(2)
+                        with col_dl1: st.download_button("📥 Download PDF Receipt", pdf, f"Receipt_{last_id}.pdf", "application/pdf")
+                        if selected_wa:
+                            msg = f"🙏 *{TEMPLE_NAME_FULL}*\n\nNamaste *{selected_name}*,\nReceipt: *#{last_id}*\nManual No: *{man_no}*\nBook No: *{book_no}*\nService: *{sel_s}*\nAmount: *₹{service['price']:,.2f}*\nDate: *{now}*"
+                            clean_wa = "".join(filter(str.isdigit, str(selected_wa)))
+                            if len(clean_wa) == 10: clean_wa = "91" + clean_wa
+                            encoded_msg = msg.replace(' ', '%20').replace('\n', '%0A').replace('#', '%23').replace('*', '%2A')
+                            with col_dl2: st.link_button("📲 Send WhatsApp", f"https://wa.me/{clean_wa}?text={encoded_msg}")
+        else:
+            st.warning("Please add services in Settings first.")
+
+elif st.session_state.current_page == "Expenses":
+    page_header()
+    render_navigation_bar()
+    st.header("Expense Management")
+    tab_add, tab_view = st.tabs(["Record Expense", "Expense History"])
+    with tab_add:
+        with st.form("add_expense"):
+            en = st.text_input("Expense Title *"); et = st.selectbox("Category", EXPENSE_TYPES)
+            ea = st.number_input("Amount (₹)", min_value=0.0); ed = st.date_input("Date", value=date.today())
+            em = st.selectbox("Payment Method", PAYMENT_METHODS); es = st.selectbox("Status", PAYMENT_STATUS)
+            ev = st.text_input("Voucher / Bill No."); desc = st.text_area("Description")
+            if st.form_submit_button("Save Expense"):
+                if en and ea > 0:
+                    run_supabase_insert("users_expenses", {"expense_name": en, "expense_type": et, "amount": ea, "payment_date": str(ed), "payment_method": em, "status": es, "voucher_no": ev, "description": desc})
+                    st.success("Expense saved.")
+    with tab_view:
+        st.dataframe(get_data("users_expenses"), use_container_width=True)
+
+elif st.session_state.current_page == "Reports":
+    page_header()
+    render_navigation_bar()
+    st.header("Reports")
+    df_i = get_data("transactions")
+    if not df_i.empty:
+        st.metric("Total Overall Income", f"₹ {df_i['amount'].sum():,.2f}")
+        st.dataframe(df_i, use_container_width=True)
+    else:
+        st.info("No transaction data available for reports.")
+
+elif st.session_state.current_page == "Assets":
+    page_header()
+    render_navigation_bar()
+    st.header("Asset Management")
+    with st.expander("Register Asset"):
+        with st.form("asset_f"):
+            an = st.text_input("Asset Name *"); ad = st.text_input("Description")
+            av = st.number_input("Value", min_value=0.0); aq = st.number_input("Qty", min_value=1)
+            if st.form_submit_button("Save"):
+                run_supabase_insert("assets", {"asset_name": an, "description": ad, "value": av, "quantity": aq})
+    st.dataframe(get_data("assets"), use_container_width=True)
 
 elif st.session_state.current_page == "Settings":
     page_header()
@@ -592,5 +641,19 @@ elif st.session_state.current_page == "Settings":
             run_supabase_insert("services", {"service_name": sn, "price": sp})
             st.rerun()
     st.table(get_data("services"))
+
+elif st.session_state.current_page == "Users":
+    page_header()
+    render_navigation_bar()
+    st.header("User Management")
+    if st.session_state.role == ADMIN_ROLE:
+        with st.form("user_f"):
+            un = st.text_input("Username"); up = st.text_input("Password", type="password")
+            ur = st.selectbox("Role", [USER_ROLE, ADMIN_ROLE])
+            if st.form_submit_button("Create"):
+                run_supabase_insert("users", {"username": un, "password_hash": hash_password(up), "role": ur})
+        st.dataframe(get_data("users", "id, username, role"), use_container_width=True)
+    else:
+        st.error("Admin access required.")
 
 render_footer()
