@@ -3,3 +3,4 @@ pandas
 reportlab
 xlsxwriter
 supabase
+openpyxl
