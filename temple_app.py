@@ -114,7 +114,7 @@ def to_excel(df):
     output = io.BytesIO()
     try:
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name='Income_Report')
+            df.to_excel(writer, index=False, sheet_name='Report')
         return output.getvalue()
     except: return None
 
@@ -437,12 +437,39 @@ elif st.session_state.current_page == "Enroll":
 
     with tab_bulk:
         st.subheader("Bulk Import Devotees")
+        
+        # --- SAMPLE EXCEL DOWNLOAD ---
+        st.markdown("### 📥 Download Sample Template")
+        sample_data = {
+            "family_tag": ["F1", "F1", "F1", "F2"],
+            "relationship": ["Head", "Wife", "Son", "Head"],
+            "name": ["Rajesh Kumar", "Priya Rajesh", "Anand Rajesh", "Suresh Nair"],
+            "phone": ["9876543210", "", "", "9988776655"],
+            "whatsapp": ["9876543210", "", "", "9988776655"],
+            "address": ["123 Temple St, Kanjampuram", "", "", "456 Main Rd, Kanyakumari"],
+            "dob": ["1980-05-15", "1985-08-20", "2012-03-10", "1975-01-10"],
+            "wedding_date": ["2010-06-12", "", "", "2005-02-14"],
+            "natchathiram": ["Ashwini", "Swathi", "Revathi", "Bharani"],
+            "yearly_pooja_date": ["2024-11-10", "", "", "2024-03-15"]
+        }
+        sample_df = pd.DataFrame(sample_data)
+        excel_sample = to_excel(sample_df)
+        if excel_sample:
+            st.download_button(
+                label="📁 Download Sample Excel Sheet",
+                data=excel_sample,
+                file_name="temple_bulk_enrollment_sample.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        
+        st.divider()
         st.info("""
             **Excel Format Instructions:**
             1. **family_tag**: Use the same unique text/number for a head and their members (e.g., 'F1', 'F2').
             2. **relationship**: Enter 'Head' for the family head. For others, enter 'Wife', 'Son', etc.
             3. **Other columns**: `name`, `phone`, `whatsapp`, `address`, `dob`, `wedding_date`, `natchathiram`, `yearly_pooja_date`.
         """)
+        
         uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
         if uploaded_file:
             try:
