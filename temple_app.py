@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import io
 import hashlib 
 import calendar
@@ -376,24 +376,48 @@ if st.session_state.current_page == "Home Dashboard":
     render_navigation_bar()
     render_news_ticker()
     st.title(f"Welcome, {st.session_state.username.title()}")
-    t_str = date.today().strftime('%Y-%m-%d')
-    y_str = date.today().strftime('%Y')
+    
+    # Financial Filtering Logic
+    today = date.today()
+    start_of_week = today - timedelta(days=today.weekday())
+    start_of_month = today.replace(day=1)
+    start_of_year = today.replace(month=1, day=1)
+
     df_trans = get_data("transactions")
     df_exp_all = get_data("users_expenses")
-    inc_t = df_trans[df_trans['date'].astype(str).str.startswith(t_str, na=False)]['amount'].sum() if not df_trans.empty else 0
-    inc_y = df_trans[df_trans['date'].astype(str).str.startswith(y_str, na=False)]['amount'].sum() if not df_trans.empty else 0
-    exp_t = df_exp_all[df_exp_all['payment_date'].astype(str) == t_str]['amount'].sum() if not df_exp_all.empty else 0
-    exp_y = df_exp_all[df_exp_all['payment_date'].astype(str).str.startswith(y_str, na=False)]['amount'].sum() if not df_exp_all.empty else 0
+    
+    # Convert dates to datetime objects for filtering
+    if not df_trans.empty:
+        df_trans['date_obj'] = pd.to_datetime(df_trans['date']).dt.date
+    if not df_exp_all.empty:
+        df_exp_all['date_obj'] = pd.to_datetime(df_exp_all['payment_date']).dt.date
+
+    def calc_stats(start_d, end_d):
+        inc = 0
+        exp = 0
+        if not df_trans.empty:
+            inc = df_trans[(df_trans['date_obj'] >= start_d) & (df_trans['date_obj'] <= end_d)]['amount'].sum()
+        if not df_exp_all.empty:
+            exp = df_exp_all[(df_exp_all['date_obj'] >= start_d) & (df_exp_all['date_obj'] <= end_d)]['amount'].sum()
+        return inc, exp, (inc - exp)
+
+    stats = {
+        "Daily": calc_stats(today, today),
+        "Weekly": calc_stats(start_of_week, today),
+        "Monthly": calc_stats(start_of_month, today),
+        "Yearly": calc_stats(start_of_year, today)
+    }
+
+    # Display Stats
+    for label, (inc, exp, net) in stats.items():
+        st.subheader(f"📊 {label} Overview")
+        c1, c2, c3 = st.columns(3)
+        c1.metric(f"{label} Income", f"₹ {inc:,.2f}")
+        c2.metric(f"{label} Expense", f"₹ {exp:,.2f}")
+        c3.metric(f"{label} Net Profit", f"₹ {net:,.2f}")
+        st.divider()
+
     df_fam = get_data("families")
-    st.subheader("💰 Income Summary")
-    c1, c2 = st.columns(2)
-    c1.metric("Today's Income", f"₹ {inc_t:,.2f}")
-    c2.metric("Yearly Income", f"₹ {inc_y:,.2f}")
-    st.subheader("💸 Expense Summary")
-    e1, e2 = st.columns(2)
-    e1.metric("Today's Expenses", f"₹ {exp_t:,.2f}")
-    e2.metric("Yearly Expenses", f"₹ {exp_y:,.2f}")
-    st.divider()
     st.metric("Total Enrolled Devotees", len(df_fam))
 
 elif st.session_state.current_page == "Enroll":
@@ -434,14 +458,34 @@ elif st.session_state.current_page == "Enroll":
             st.subheader("Step 2: Add Family Members")
             with st.form("add_member_form", clear_on_submit=True):
                 col_nm1, col_nm2 = st.columns(2)
-                with col_nm1: m_name = st.text_input("Member Name")
-                with col_nm2: m_rel = st.selectbox("Relationship", [""] + RELATIONSHIP_OPTIONS)
+                with col_nm1: m_name = st.text_input("Member Name *")
+                with col_nm2: m_rel = st.selectbox("Relationship *", [""] + RELATIONSHIP_OPTIONS)
+                
                 col_cnt1, col_cnt2 = st.columns(2)
                 with col_cnt1: m_phone = st.text_input("Member Mobile No.")
                 with col_cnt2: m_wa = st.text_input("Member WhatsApp No.")
+                
+                col_dates1, col_dates2 = st.columns(2)
+                with col_dates1: m_dob = st.date_input("Date of Birth", value=None, min_value=MIN_DATE)
+                with col_dates2: m_wedding = st.date_input("Wedding Day", value=None, min_value=MIN_DATE)
+                
+                col_extra1, col_extra2 = st.columns(2)
+                with col_extra1: mnatch = st.selectbox("Star", [""] + NATCHATHIRAM_OPTIONS)
+                with col_extra2: mpooja = st.date_input("Yearly Pooja Reminder", value=None)
+                
                 if st.form_submit_button("Add Member"):
                     if m_name:
-                        data = {"family_id": st.session_state.new_family_id, "member_name": m_name, "relationship": m_rel, "phone": m_phone, "whatsapp": m_wa}
+                        data = {
+                            "family_id": st.session_state.new_family_id, 
+                            "member_name": m_name, 
+                            "relationship": m_rel, 
+                            "phone": m_phone, 
+                            "whatsapp": m_wa,
+                            "dob": format_date_for_db(m_dob),
+                            "wedding_date": format_date_for_db(m_wedding),
+                            "natchathiram": mnatch,
+                            "yearly_pooja_date": format_date_for_db(mpooja)
+                        }
                         run_supabase_insert("members", data)
                         st.success(f"Member {m_name} added!")
                     else: st.error("Name required.")
@@ -567,7 +611,8 @@ elif st.session_state.current_page == "Search":
                                 else:
                                     for _, m in fam_m.iterrows():
                                         col_m1, col_m2 = st.columns([4, 1])
-                                        col_m1.write(f"- {m['member_name']} ({m['relationship']})")
+                                        m_dob_fmt = datetime.strptime(m['dob'], '%Y-%m-%d').strftime('%d/%m/%Y') if m['dob'] else "N/A"
+                                        col_m1.write(f"- **{m['member_name']}** ({m['relationship']}) | DOB: {m_dob_fmt}")
                                         if col_m2.button("🗑️", key=f"del_mem_{m['id']}"):
                                             run_supabase_delete("members", m['id'])
                                             st.rerun()
@@ -575,7 +620,6 @@ elif st.session_state.current_page == "Search":
                             st.divider()
                             st.write("🗑️ **Danger Zone**")
                             if st.button(f"Delete Account: {row['head_name']}", key=f"del_{row['id']}"):
-                                # Supabase will handle cascade if configured, but let's be explicit
                                 supabase.table("members").delete().eq("family_id", row['id']).execute()
                                 run_supabase_delete("families", row['id'])
                                 st.rerun()
