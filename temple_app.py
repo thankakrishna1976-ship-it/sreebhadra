@@ -90,6 +90,14 @@ def get_data(table_name, select="*"):
 
 # --- UTILITY FUNCTIONS ---
 
+def format_date_for_db(val):
+    """Handles Pandas NaT and empty strings to ensure valid SQL DATE or NULL."""
+    if pd.isna(val) or str(val).strip() == "" or str(val).lower() == "nat":
+        return None
+    if isinstance(val, (datetime, pd.Timestamp)):
+        return val.strftime('%Y-%m-%d')
+    return str(val)
+
 def get_base64_of_bin_file(bin_file):
     try:
         if os.path.exists(bin_file):
@@ -116,7 +124,8 @@ def to_excel(df):
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             df.to_excel(writer, index=False, sheet_name='Report')
         return output.getvalue()
-    except: return None
+    except Exception:
+        return None
 
 def generate_income_pdf(df, title, total_income):
     buffer = io.BytesIO()
@@ -126,8 +135,8 @@ def generate_income_pdf(df, title, total_income):
     story.append(Paragraph(f"<b>Total Income:</b> ₹ {total_income:,.2f}", styles['Normal']))
     story.append(Spacer(1, 12))
     df_pdf = df.copy()
-    if 'Amount' in df_pdf.columns:
-        df_pdf['Amount'] = df_pdf['Amount'].apply(lambda x: f"₹ {float(x):,.2f}")
+    if 'amount' in df_pdf.columns:
+        df_pdf['amount'] = df_pdf['amount'].apply(lambda x: f"₹ {float(x):,.2f}")
     data = [df_pdf.columns.tolist()] + df_pdf.values.tolist()
     t = Table(data, hAlign='LEFT')
     t.setStyle(TableStyle([
@@ -307,11 +316,12 @@ def render_navigation_bar():
 def save_family_head(head_name, dob, wedding_date, n_star, address, phone, whatsapp, photo_str, pooja_date):
     if head_name and phone:
         data = {
-            "head_name": head_name, "dob": str(dob) if dob else None,
-            "wedding_date": str(wedding_date) if wedding_date else None,
+            "head_name": head_name, 
+            "dob": format_date_for_db(dob),
+            "wedding_date": format_date_for_db(wedding_date),
             "natchathiram": n_star, "address": address, "phone": phone,
             "whatsapp": whatsapp, "photo": photo_str,
-            "yearly_pooja_date": str(pooja_date) if pooja_date else None
+            "yearly_pooja_date": format_date_for_db(pooja_date)
         }
         res = run_supabase_insert("families", data)
         if res and res.data:
@@ -327,9 +337,10 @@ def render_news_ticker():
     ticker_items = []
     df_fam = get_data("families")
     if not df_fam.empty:
-        b_df = df_fam[df_fam['dob'].str.contains(today_md, na=False)]
+        # Check dob exists and is not None before filtering
+        b_df = df_fam[df_fam['dob'].astype(str).str.contains(today_md, na=False)]
         for _, r in b_df.iterrows(): ticker_items.append(f"🎂 Happy Birthday to Devotee Head: {r['head_name']}!")
-        p_df = df_fam[df_fam['yearly_pooja_date'].str.contains(today_md, na=False)]
+        p_df = df_fam[df_fam['yearly_pooja_date'].astype(str).str.contains(today_md, na=False)]
         for _, r in p_df.iterrows(): ticker_items.append(f"🙏 Yearly Special Pooja Reminder for Head: {r['head_name']}!")
     scrolling_text = " | ".join(ticker_items) if ticker_items else "✨ Welcome to Sree Bhadreshwari Amman Temple Management System. ✨"
     st.markdown(f"""
@@ -369,10 +380,10 @@ if st.session_state.current_page == "Home Dashboard":
     y_str = date.today().strftime('%Y')
     df_trans = get_data("transactions")
     df_exp_all = get_data("users_expenses")
-    inc_t = df_trans[df_trans['date'].str.startswith(t_str, na=False)]['amount'].sum() if not df_trans.empty else 0
-    inc_y = df_trans[df_trans['date'].str.startswith(y_str, na=False)]['amount'].sum() if not df_trans.empty else 0
-    exp_t = df_exp_all[df_exp_all['payment_date'] == t_str]['amount'].sum() if not df_exp_all.empty else 0
-    exp_y = df_exp_all[df_exp_all['payment_date'].str.startswith(y_str, na=False)]['amount'].sum() if not df_exp_all.empty else 0
+    inc_t = df_trans[df_trans['date'].astype(str).str.startswith(t_str, na=False)]['amount'].sum() if not df_trans.empty else 0
+    inc_y = df_trans[df_trans['date'].astype(str).str.startswith(y_str, na=False)]['amount'].sum() if not df_trans.empty else 0
+    exp_t = df_exp_all[df_exp_all['payment_date'].astype(str) == t_str]['amount'].sum() if not df_exp_all.empty else 0
+    exp_y = df_exp_all[df_exp_all['payment_date'].astype(str).str.startswith(y_str, na=False)]['amount'].sum() if not df_exp_all.empty else 0
     df_fam = get_data("families")
     st.subheader("💰 Income Summary")
     c1, c2 = st.columns(2)
@@ -473,14 +484,16 @@ elif st.session_state.current_page == "Enroll":
         uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
         if uploaded_file:
             try:
-                bulk_df = pd.read_excel(uploaded_file).fillna("")
+                # Use engine='openpyxl' for .xlsx
+                bulk_df = pd.read_excel(uploaded_file, engine='openpyxl')
                 st.write("Preview of data:")
                 st.dataframe(bulk_df.head())
                 
                 if st.button("🚀 Process Bulk Upload"):
                     success_count = 0
+                    # Sort so Head is processed first within groups if not already
                     for tag, group in bulk_df.groupby('family_tag'):
-                        head_mask = group['relationship'].str.lower() == 'head'
+                        head_mask = group['relationship'].astype(str).str.lower() == 'head'
                         if not head_mask.any():
                             st.error(f"Error: Family Tag '{tag}' has no 'Head' defined. Skipping.")
                             continue
@@ -492,9 +505,9 @@ elif st.session_state.current_page == "Enroll":
                             "whatsapp": str(head_row['whatsapp']),
                             "address": str(head_row['address']),
                             "natchathiram": str(head_row['natchathiram']),
-                            "dob": str(head_row['dob']) if head_row['dob'] else None,
-                            "wedding_date": str(head_row['wedding_date']) if head_row['wedding_date'] else None,
-                            "yearly_pooja_date": str(head_row['yearly_pooja_date']) if head_row['yearly_pooja_date'] else None
+                            "dob": format_date_for_db(head_row['dob']),
+                            "wedding_date": format_date_for_db(head_row['wedding_date']),
+                            "yearly_pooja_date": format_date_for_db(head_row['yearly_pooja_date'])
                         }
                         
                         h_res = run_supabase_insert("families", head_data)
@@ -510,12 +523,14 @@ elif st.session_state.current_page == "Enroll":
                                     "phone": str(m_row['phone']),
                                     "whatsapp": str(m_row['whatsapp']),
                                     "natchathiram": str(m_row['natchathiram']),
-                                    "dob": str(m_row['dob']) if m_row['dob'] else None,
-                                    "wedding_date": str(m_row['wedding_date']) if m_row['wedding_date'] else None,
-                                    "yearly_pooja_date": str(m_row['yearly_pooja_date']) if m_row['yearly_pooja_date'] else None
+                                    "dob": format_date_for_db(m_row['dob']),
+                                    "wedding_date": format_date_for_db(m_row['wedding_date']),
+                                    "yearly_pooja_date": format_date_for_db(m_row['yearly_pooja_date'])
                                 }
                                 run_supabase_insert("members", m_data)
                     st.success(f"Successfully uploaded {success_count} families!")
+            except ImportError:
+                st.error("Missing optional dependency 'openpyxl'. Please ensure it is added to your requirements.txt file.")
             except Exception as e:
                 st.error(f"Failed to process file: {e}")
 
@@ -527,7 +542,7 @@ elif st.session_state.current_page == "Search":
     df = get_data("families")
     if not df.empty:
         if search_term:
-            df = df[df['head_name'].str.contains(search_term, case=False, na=False) | df['phone'].str.contains(search_term, na=False)]
+            df = df[df['head_name'].astype(str).str.contains(search_term, case=False, na=False) | df['phone'].astype(str).str.contains(search_term, na=False)]
         
         if df.empty:
             st.info("No matching devotees found.")
@@ -560,6 +575,7 @@ elif st.session_state.current_page == "Search":
                             st.divider()
                             st.write("🗑️ **Danger Zone**")
                             if st.button(f"Delete Account: {row['head_name']}", key=f"del_{row['id']}"):
+                                # Supabase will handle cascade if configured, but let's be explicit
                                 supabase.table("members").delete().eq("family_id", row['id']).execute()
                                 run_supabase_delete("families", row['id'])
                                 st.rerun()
