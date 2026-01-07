@@ -633,19 +633,41 @@ elif st.session_state.current_page == "Billing":
     billing_mode = st.radio("Billing Mode", ["Enrolled Devotee", "Guest Devotee"], horizontal=True)
     col1, col2 = st.columns([2, 1])
     with col1:
-        selected_name = ""; selected_wa = ""; selected_id = 0
+        selected_name = ""; selected_wa = ""; selected_id = 0; selected_address = ""
+        
         if billing_mode == "Enrolled Devotee":
             fams = get_data("families")
+            mems = get_data("members")
+            
             if not fams.empty:
-                fam_list = {f"{r['head_name']} ({r['phone']})": r for _, r in fams.iterrows()}
-                sel_f = st.selectbox("Choose Devotee", list(fam_list.keys()))
-                dev = fam_list[sel_f]
-                selected_name, selected_id = dev['head_name'], dev['id']
-                selected_wa = str(dev['whatsapp']).strip() if str(dev['whatsapp']).strip() else str(dev['phone']).strip()
+                # Combine Heads and Members for selection
+                devotees_options = {}
+                for _, f in fams.iterrows():
+                    key = f"{f['head_name']} (Head) - {f['phone']}"
+                    devotees_options[key] = {
+                        "id": f['id'], "name": f['head_name'], "address": f['address'],
+                        "wa": str(f['whatsapp']).strip() if str(f['whatsapp']).strip() else str(f['phone']).strip()
+                    }
+                
+                if not mems.empty:
+                    for _, m in mems.iterrows():
+                        # Link back to family head name for clarity
+                        head_name = fams[fams['id'] == m['family_id']]['head_name'].values[0] if not fams[fams['id'] == m['family_id']].empty else "Unknown"
+                        key = f"{m['member_name']} ({m['relationship']}) - Head: {head_name}"
+                        devotees_options[key] = {
+                            "id": m['family_id'], "name": m['member_name'], 
+                            "address": fams[fams['id'] == m['family_id']]['address'].values[0] if not fams[fams['id'] == m['family_id']].empty else "N/A",
+                            "wa": str(m['whatsapp']).strip() if str(m['whatsapp']).strip() else (str(m['phone']).strip() if str(m['phone']).strip() else devotees_options.get(f"{head_name} (Head)", {}).get("wa", ""))
+                        }
+                
+                sel_key = st.selectbox("Select Devotee (Heads & Members)", list(devotees_options.keys()))
+                dev_data = devotees_options[sel_key]
+                selected_name, selected_id, selected_address, selected_wa = dev_data['name'], dev_data['id'], dev_data['address'], dev_data['wa']
             else:
                 st.warning("Enroll a devotee first.")
         else:
             selected_name = st.text_input("Guest Name *")
+            selected_address = st.text_area("Guest Address")
             selected_wa = st.text_input("Guest WhatsApp No.")
 
         services = get_data("services")
@@ -660,20 +682,45 @@ elif st.session_state.current_page == "Billing":
                     st.error("Enter Guest Name.")
                 else:
                     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    data = {"family_id": selected_id, "service_id": service['id'], "amount": service['price'], "date": now, "manual_bill_no": man_no, "bill_book_no": book_no, "guest_name": selected_name if selected_id == 0 else "", "guest_whatsapp": selected_wa}
+                    # Store data
+                    data = {
+                        "family_id": selected_id, 
+                        "service_id": service['id'], 
+                        "amount": service['price'], 
+                        "date": now, 
+                        "manual_bill_no": man_no, 
+                        "bill_book_no": book_no, 
+                        "guest_name": selected_name if selected_id == 0 else "", 
+                        "guest_address": selected_address if selected_id == 0 else "",
+                        "guest_whatsapp": selected_wa
+                    }
                     res = run_supabase_insert("transactions", data)
                     if res and res.data:
                         last_id = res.data[0]['id']
-                        pdf = generate_pdf(last_id, selected_name, "", sel_s, service['price'], now, man_no, book_no)
+                        pdf = generate_pdf(last_id, selected_name, selected_address, sel_s, service['price'], now, man_no, book_no)
                         st.success("Receipt generated successfully!")
+                        
                         col_dl1, col_dl2 = st.columns(2)
-                        with col_dl1: st.download_button("📥 Download PDF Receipt", pdf, f"Receipt_{last_id}.pdf", "application/pdf")
+                        with col_dl1:
+                            st.download_button("📥 Download PDF Receipt", pdf, f"Receipt_{last_id}.pdf", "application/pdf", use_container_width=True)
+                        
                         if selected_wa:
-                            msg = f"🙏 *{TEMPLE_NAME_FULL}*\n\nNamaste *{selected_name}*,\nReceipt: *#{last_id}*\nManual No: *{man_no}*\nBook No: *{book_no}*\nService: *{sel_s}*\nAmount: *₹{service['price']:,.2f}*\nDate: *{now}*"
+                            msg = (
+                                f"🙏 *{TEMPLE_NAME_FULL}*\n\n"
+                                f"Namaste *{selected_name}*,\n"
+                                f"Receipt No: *#{last_id}*\n"
+                                f"Manual No: *{man_no if man_no else 'N/A'}*\n"
+                                f"Book No: *{book_no if book_no else 'N/A'}*\n"
+                                f"Service: *{sel_s}*\n"
+                                f"Amount Paid: *₹{service['price']:,.2f}*\n"
+                                f"Date: *{now}*\n\n"
+                                f"May the blessings of Amman be with you. ✨"
+                            )
                             clean_wa = "".join(filter(str.isdigit, str(selected_wa)))
                             if len(clean_wa) == 10: clean_wa = "91" + clean_wa
                             encoded_msg = msg.replace(' ', '%20').replace('\n', '%0A').replace('#', '%23').replace('*', '%2A')
-                            with col_dl2: st.link_button("📲 Send WhatsApp", f"https://wa.me/{clean_wa}?text={encoded_msg}")
+                            with col_dl2:
+                                st.link_button("📲 Send WhatsApp Summary", f"https://wa.me/{clean_wa}?text={encoded_msg}", use_container_width=True)
         else:
             st.warning("Please add services in Settings first.")
 
@@ -698,7 +745,7 @@ elif st.session_state.current_page == "Expenses":
 elif st.session_state.current_page == "Reports":
     page_header()
     render_navigation_bar()
-    st.header("Reports")
+    st.header("Financial Reports")
     df_i = get_data("transactions")
     if not df_i.empty:
         st.metric("Total Overall Income", f"₹ {df_i['amount'].sum():,.2f}")
