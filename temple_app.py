@@ -515,23 +515,23 @@ elif st.session_state.current_page == "Enroll":
         # --- SAMPLE EXCEL DOWNLOAD ---
         st.markdown("### 📥 Download Sample Template")
         sample_data = {
-            "வரிசை எண்": [1, "", "", 2],
-            "பெயர்": ["Rajesh Kumar", "", "", "Suresh Nair"],
-            "முகவரி": ["123 Temple St, Kanjampuram", "", "", "456 Main Rd, Kanyakumari"],
-            "மொபைல் எண்": ["9876543210", "", "", "9988776655"],
-            "வாட்ஸ் அப் எண்": ["9876543210", "", "", "9988776655"],
-            "உறுப்பினர்கள்": ["Rajesh Kumar", "Priya Rajesh", "Anand Rajesh", "Suresh Nair"],
-            "உறவு முறை": ["குடும்பதலைவர்", "மனைவி", "மகன்", "குடும்ப தலைவர்"],
-            "பிறந்த நாள்": ["1980-05-15", "1985-08-20", "2012-03-10", "1975-01-10"],
-            "நட்சத்திரம்": ["Ashwini", "Swathi", "Revathi", "Bharani"],
-            "திருமண நாள்": ["2010-06-12", "", "", "2005-02-14"],
-            "வருஷபூஜை": ["2024-11-10", "", "", "2024-03-15"]
+            "Sl.No": [1, "", "", 2],
+            "Name": ["Rajesh Kumar", "", "", "Suresh Nair"],
+            "Address": ["123 Temple St, Kanjampuram", "", "", "456 Main Rd, Kanyakumari"],
+            "Mobile No": ["9876543210", "", "", "9988776655"],
+            "WhatsApp No": ["9876543210", "", "", "9988776655"],
+            "Members": ["Rajesh Kumar", "Priya Rajesh", "Anand Rajesh", "Suresh Nair"],
+            "Relationship": ["Family Head", "Wife", "Son", "Family Head"],
+            "Date of Birth": ["1980-05-15", "1985-08-20", "2012-03-10", "1975-01-10"],
+            "Star": ["Ashwini", "Swathi", "Revathi", "Bharani"],
+            "Wedding Day": ["2010-06-12", "", "", "2005-02-14"],
+            "Yearly Pooja": ["2024-11-10", "", "", "2024-03-15"]
         }
         sample_df = pd.DataFrame(sample_data)
         excel_sample = to_excel(sample_df)
         if excel_sample:
             st.download_button(
-                label="📁 Download Sample Excel Sheet (Same Format)",
+                label="📁 Download Sample Excel Sheet",
                 data=excel_sample,
                 file_name="temple_bulk_upload_template.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -540,14 +540,15 @@ elif st.session_state.current_page == "Enroll":
         st.divider()
         st.info("""
             **Excel Format Instructions:**
-            1. New families start with a number in the **'வரிசை எண்'** column.
-            2. For family members, leave **'வரிசை எண்'**, **'பெயர்'**, **'முகவரி'**, etc., blank.
-            3. **'உறவு முறை'** for the head should be 'குடும்பதலைவர்' or 'குடும்ப தலைவர்'.
+            1. New families start with a number in the **'Sl.No'** column.
+            2. For family members, leave **'Sl.No'**, **'Name'**, **'Address'**, etc., blank.
+            3. **'Relationship'** for the head should be 'Family Head'.
         """)
         
         uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
         if uploaded_file:
             try:
+                # Use engine='openpyxl' for .xlsx
                 bulk_df = pd.read_excel(uploaded_file, engine='openpyxl')
                 st.write("File Preview:")
                 st.dataframe(bulk_df.head())
@@ -556,21 +557,21 @@ elif st.session_state.current_page == "Enroll":
                     success_count = 0
                     current_fid = None
                     
-                    # Columns from your file format
-                    col_sl = "வரிசை எண்"
-                    col_name = "பெயர்"
-                    col_addr = "முகவரி"
-                    col_mob = "மொபைல் எண்"
-                    col_wa = "வாட்ஸ் அப் எண்"
-                    col_mem_name = "உறுப்பினர்கள்"
-                    col_rel = "உறவு முறை"
-                    col_dob = "பிறந்த நாள்"
-                    col_star = "நட்சத்திரம்"
-                    col_wed = "திருமண நாள்"
-                    col_pj = "வருஷபூஜை"
+                    # English headers
+                    col_sl = "Sl.No"
+                    col_name = "Name"
+                    col_addr = "Address"
+                    col_mob = "Mobile No"
+                    col_wa = "WhatsApp No"
+                    col_mem_name = "Members"
+                    col_rel = "Relationship"
+                    col_dob = "Date of Birth"
+                    col_star = "Star"
+                    col_wed = "Wedding Day"
+                    col_pj = "Yearly Pooja"
 
                     for _, row in bulk_df.iterrows():
-                        is_head = str(row.get(col_rel, "")).strip() in ["குடும்பதலைவர்", "குடும்ப தலைவர்"] or not pd.isna(row.get(col_sl))
+                        is_head = str(row.get(col_rel, "")).strip().lower() == "family head" or not pd.isna(row.get(col_sl))
                         
                         if is_head and not pd.isna(row.get(col_name)) and str(row.get(col_name)).strip() != "":
                             # Insert New Family Head
@@ -595,7 +596,7 @@ elif st.session_state.current_page == "Enroll":
                                 "family_id": current_fid,
                                 "member_name": str(row[col_mem_name]),
                                 "relationship": str(row[col_rel]),
-                                "phone": "", # Members usually share head's contact in your file
+                                "phone": "", 
                                 "whatsapp": "",
                                 "natchathiram": str(row[col_star]),
                                 "dob": format_date_for_db(row[col_dob]),
@@ -606,6 +607,8 @@ elif st.session_state.current_page == "Enroll":
                     
                     st.success(f"Successfully uploaded {success_count} families!")
                     st.rerun()
+            except ImportError:
+                st.error("Missing optional dependency 'openpyxl'. Please ensure it is added to your requirements.txt file.")
             except Exception as e:
                 st.error(f"Failed to process file: {e}")
 
