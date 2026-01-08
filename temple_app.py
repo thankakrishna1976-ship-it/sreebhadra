@@ -151,29 +151,59 @@ def to_excel(df):
     except Exception:
         return None
 
-def generate_income_pdf(df, title, total_income):
+def generate_financial_pdf(income_df, expense_df, title, t_inc, t_exp, t_net):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=50, bottomMargin=30)
     styles = getSampleStyleSheet()
     story = [Paragraph(TEMPLE_NAME_FULL, styles['Title']), Paragraph(title, styles['h3']), Spacer(1, 12)]
-    story.append(Paragraph(f"<b>Total Income:</b> ₹ {total_income:,.2f}", styles['Normal']))
-    story.append(Spacer(1, 12))
-    df_pdf = df.copy()
-    if 'amount' in df_pdf.columns:
-        df_pdf['amount'] = df_pdf['amount'].apply(lambda x: f"₹ {float(x):,.2f}")
-    data = [df_pdf.columns.tolist()] + df_pdf.values.tolist()
-    t = Table(data, hAlign='LEFT')
-    t.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#800000')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.gold),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.whitesmoke),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
+    
+    # Summary Table
+    summary_data = [
+        ["Total Income", f"₹ {t_inc:,.2f}"],
+        ["Total Expenses", f"₹ {t_exp:,.2f}"],
+        ["Net Profit", f"₹ {t_net:,.2f}"]
+    ]
+    st_table = Table(summary_data, colWidths=[150, 150])
+    st_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('FONTNAME', (0,0), (-1,-1), 'Helvetica-Bold')
     ]))
-    story.append(t)
+    story.append(st_table)
+    story.append(Spacer(1, 24))
+    
+    # Income Section
+    story.append(Paragraph("Income Details", styles['h4']))
+    if not income_df.empty:
+        inc_data = [income_df.columns.tolist()] + income_df.values.tolist()
+        t_inc = Table(inc_data, hAlign='LEFT', repeatRows=1)
+        t_inc.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#800000')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.gold),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ]))
+        story.append(t_inc)
+    else:
+        story.append(Paragraph("No income records for this period.", styles['Normal']))
+        
+    story.append(Spacer(1, 24))
+
+    # Expense Section
+    story.append(Paragraph("Expense Details", styles['h4']))
+    if not expense_df.empty:
+        exp_data = [expense_df.columns.tolist()] + expense_df.values.tolist()
+        t_exp = Table(exp_data, hAlign='LEFT', repeatRows=1)
+        t_exp.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#800000')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.gold),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ]))
+        story.append(t_exp)
+    else:
+        story.append(Paragraph("No expense records for this period.", styles['Normal']))
+
     doc.build(story)
     buffer.seek(0)
     return buffer
@@ -829,7 +859,7 @@ elif st.session_state.current_page == "Billing":
                         res = run_supabase_insert("transactions", payload)
                         if res and res.data:
                             last_id = res.data[0]['id']
-                            pdf = generate_pdf(last_id, selected_name, selected_address, sel_s, srv['price'], now, man_no, book_no)
+                            pdf = generate_pdf(last_id, selected_name, {selected_address}, sel_s, srv['price'], now, man_no, book_no)
                             st.success("Bill Generated!")
                             c_dl1, c_dl2 = st.columns(2)
                             with c_dl1: st.download_button("📥 PDF Receipt", pdf, f"Rec_{last_id}.pdf")
@@ -908,11 +938,103 @@ elif st.session_state.current_page == "Reports":
     page_header()
     render_navigation_bar()
     st.header("Financial Reports")
-    tr_df = get_data("transactions")
-    if not tr_df.empty:
-        st.metric("Total Overall Income", f"₹ {tr_df['amount'].sum():,.2f}")
-        st.dataframe(tr_df, use_container_width=True)
-    else: st.info("No data.")
+    
+    # Report Filtering Section
+    st.markdown("### 📊 Select Report Parameters")
+    report_mode = st.radio("Report Period:", ["Daily", "Weekly", "Monthly", "Custom Date Range"], horizontal=True)
+    
+    today = date.today()
+    start_d, end_d = today, today
+    
+    if report_mode == "Daily":
+        start_d = st.date_input("Select Date", value=today)
+        end_d = start_d
+    elif report_mode == "Weekly":
+        # Streamlit doesn't have a direct week picker, so we pick a day and find the week
+        ref_date = st.date_input("Select a day in the target week", value=today)
+        start_d = ref_date - timedelta(days=ref_date.weekday()) # Monday
+        end_d = start_d + timedelta(days=6) # Sunday
+        st.info(f"Report for week: {start_d.strftime('%d/%m/%Y')} to {end_d.strftime('%d/%m/%Y')}")
+    elif report_mode == "Monthly":
+        c_m, c_y = st.columns(2)
+        with c_m: sel_month = st.selectbox("Month", list(calendar.month_name)[1:], index=today.month-1)
+        with c_y: sel_year = st.number_input("Year", min_value=2020, max_value=2050, value=today.year)
+        month_idx = list(calendar.month_name).index(sel_month)
+        start_d = date(sel_year, month_idx, 1)
+        last_day = calendar.monthrange(sel_year, month_idx)[1]
+        end_d = date(sel_year, month_idx, last_day)
+    else:
+        cs1, cs2 = st.columns(2)
+        with cs1: start_d = st.date_input("Start Date", value=today - timedelta(days=30))
+        with cs2: end_d = st.date_input("End Date", value=today)
+
+    # Fetch Data
+    df_trans = get_data("transactions")
+    df_exp = get_data("users_expenses")
+    df_serv = get_data("services")
+
+    # Filter Data
+    if not df_trans.empty:
+        df_trans['dt'] = pd.to_datetime(df_trans['date']).dt.date
+        df_trans = df_trans[(df_trans['dt'] >= start_d) & (df_trans['dt'] <= end_d)]
+    
+    if not df_exp.empty:
+        df_exp['dt'] = pd.to_datetime(df_exp['payment_date']).dt.date
+        df_exp = df_exp[(df_exp['dt'] >= start_d) & (df_exp['dt'] <= end_d)]
+
+    # Metrics
+    t_inc = df_trans['amount'].sum() if not df_trans.empty else 0
+    t_exp = df_exp['amount'].sum() if not df_exp.empty else 0
+    t_net = t_inc - t_exp
+
+    st.divider()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Period Income", f"₹ {t_inc:,.2f}")
+    c2.metric("Period Expenses", f"₹ {t_exp:,.2f}")
+    c3.metric("Net Profit", f"₹ {t_net:,.2f}")
+
+    # Tables & Downloads
+    tab_inc, tab_exp = st.tabs(["Income Details", "Expense Details"])
+    
+    with tab_inc:
+        if not df_trans.empty:
+            # Map service names for readable report
+            if not df_serv.empty:
+                s_map = dict(zip(df_serv['id'], df_serv['service_name']))
+                df_trans['Service'] = df_trans['service_id'].map(s_map)
+            
+            report_inc_df = df_trans[['dt', 'guest_name', 'Service', 'amount', 'manual_bill_no', 'bill_book_no']].rename(columns={'dt': 'Date', 'guest_name': 'Devotee', 'amount': 'Amount', 'manual_bill_no': 'Manual No', 'bill_book_no': 'Book No'})
+            st.dataframe(report_inc_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No income records found for this period.")
+
+    with tab_exp:
+        if not df_exp.empty:
+            report_exp_df = df_exp[['dt', 'expense_name', 'expense_type', 'amount', 'payment_method', 'status']].rename(columns={'dt': 'Date', 'expense_name': 'Title', 'expense_type': 'Category', 'amount': 'Amount', 'payment_method': 'Method'})
+            st.dataframe(report_exp_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No expense records found for this period.")
+
+    # Combined Downloads
+    if t_inc > 0 or t_exp > 0:
+        st.divider()
+        st.markdown("### 📥 Download Reports")
+        d_col1, d_col2 = st.columns(2)
+        
+        with d_col1:
+            title_str = f"Financial Report: {start_d.strftime('%d/%m/%Y')} - {end_d.strftime('%d/%m/%Y')}"
+            inc_data = report_inc_df if not df_trans.empty else pd.DataFrame()
+            exp_data = report_exp_df if not df_exp.empty else pd.DataFrame()
+            pdf_data = generate_financial_pdf(inc_data, exp_data, title_str, t_inc, t_exp, t_net)
+            st.download_button("📂 Download PDF Report", pdf_data, f"Report_{start_d}.pdf", "application/pdf", use_container_width=True)
+            
+        with d_col2:
+            # Simple Excel export
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                if not df_trans.empty: report_inc_df.to_excel(writer, sheet_name='Income', index=False)
+                if not df_exp.empty: report_exp_df.to_excel(writer, sheet_name='Expenses', index=False)
+            st.download_button("📊 Download Excel Report", output.getvalue(), f"Report_{start_d}.xlsx", use_container_width=True)
 
 elif st.session_state.current_page == "Assets":
     page_header()
