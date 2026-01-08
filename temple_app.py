@@ -94,9 +94,11 @@ def format_date_for_db(val):
     """Handles Pandas NaT and empty strings to ensure valid SQL DATE or NULL."""
     if pd.isna(val) or str(val).strip() == "" or str(val).lower() == "nat":
         return None
-    if isinstance(val, (datetime, pd.Timestamp)):
-        return val.strftime('%Y-%m-%d')
-    return str(val)
+    try:
+        d_obj = pd.to_datetime(val)
+        return d_obj.strftime('%Y-%m-%d')
+    except:
+        return None
 
 def format_date_for_ui(val):
     """Converts YYYY-MM-DD from database to DD/MM/YYYY for tabular display."""
@@ -509,72 +511,103 @@ elif st.session_state.current_page == "Enroll":
 
     with tab_bulk:
         st.subheader("Bulk Import Devotees")
+        
         # --- SAMPLE EXCEL DOWNLOAD ---
         st.markdown("### 📥 Download Sample Template")
         sample_data = {
-            "family_tag": ["F1", "F1", "F1", "F2"],
-            "relationship": ["Head", "Wife", "Son", "Head"],
-            "name": ["Rajesh Kumar", "Priya Rajesh", "Anand Rajesh", "Suresh Nair"],
-            "phone": ["9876543210", "", "", "9988776655"],
-            "whatsapp": ["9876543210", "", "", "9988776655"],
-            "address": ["123 Temple St, Kanjampuram", "", "", "456 Main Rd, Kanyakumari"],
-            "dob": ["1980-05-15", "1985-08-20", "2012-03-10", "1975-01-10"],
-            "wedding_date": ["2010-06-12", "", "", "2005-02-14"],
-            "natchathiram": ["Ashwini", "Swathi", "Revathi", "Bharani"],
-            "yearly_pooja_date": ["2024-11-10", "", "", "2024-03-15"]
+            "வரிசை எண்": [1, "", "", 2],
+            "பெயர்": ["Rajesh Kumar", "", "", "Suresh Nair"],
+            "முகவரி": ["123 Temple St, Kanjampuram", "", "", "456 Main Rd, Kanyakumari"],
+            "மொபைல் எண்": ["9876543210", "", "", "9988776655"],
+            "வாட்ஸ் அப் எண்": ["9876543210", "", "", "9988776655"],
+            "உறுப்பினர்கள்": ["Rajesh Kumar", "Priya Rajesh", "Anand Rajesh", "Suresh Nair"],
+            "உறவு முறை": ["குடும்பதலைவர்", "மனைவி", "மகன்", "குடும்ப தலைவர்"],
+            "பிறந்த நாள்": ["1980-05-15", "1985-08-20", "2012-03-10", "1975-01-10"],
+            "நட்சத்திரம்": ["Ashwini", "Swathi", "Revathi", "Bharani"],
+            "திருமண நாள்": ["2010-06-12", "", "", "2005-02-14"],
+            "வருஷபூஜை": ["2024-11-10", "", "", "2024-03-15"]
         }
         sample_df = pd.DataFrame(sample_data)
         excel_sample = to_excel(sample_df)
         if excel_sample:
             st.download_button(
-                label="📁 Download Sample Excel Sheet",
+                label="📁 Download Sample Excel Sheet (Same Format)",
                 data=excel_sample,
-                file_name="temple_bulk_enrollment_sample.xlsx",
+                file_name="temple_bulk_upload_template.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         
         st.divider()
         st.info("""
             **Excel Format Instructions:**
-            1. **family_tag**: Use the same unique ID for a head and their members.
-            2. **relationship**: Enter 'Head' for the head, others use 'Wife', 'Son', etc.
-            3. **Date format**: Use YYYY-MM-DD for dates in the Excel sheet.
+            1. New families start with a number in the **'வரிசை எண்'** column.
+            2. For family members, leave **'வரிசை எண்'**, **'பெயர்'**, **'முகவரி'**, etc., blank.
+            3. **'உறவு முறை'** for the head should be 'குடும்பதலைவர்' or 'குடும்ப தலைவர்'.
         """)
         
         uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
         if uploaded_file:
             try:
                 bulk_df = pd.read_excel(uploaded_file, engine='openpyxl')
+                st.write("File Preview:")
                 st.dataframe(bulk_df.head())
+                
                 if st.button("🚀 Process Bulk Upload"):
                     success_count = 0
-                    for tag, group in bulk_df.groupby('family_tag'):
-                        head_mask = group['relationship'].astype(str).str.lower() == 'head'
-                        if not head_mask.any(): continue
-                        head_row = group[head_mask].iloc[0]
-                        head_data = {
-                            "head_name": str(head_row['name']), "phone": str(head_row['phone']),
-                            "whatsapp": str(head_row['whatsapp']), "address": str(head_row['address']),
-                            "natchathiram": str(head_row['natchathiram']), "dob": format_date_for_db(head_row['dob']),
-                            "wedding_date": format_date_for_db(head_row['wedding_date']),
-                            "yearly_pooja_date": format_date_for_db(head_row['yearly_pooja_date'])
-                        }
-                        h_res = run_supabase_insert("families", head_data)
-                        if h_res and h_res.data:
-                            new_fid = h_res.data[0]['id']
-                            success_count += 1
-                            for _, m_row in group[~head_mask].iterrows():
-                                m_data = {
-                                    "family_id": new_fid, "member_name": str(m_row['name']),
-                                    "relationship": str(m_row['relationship']), "phone": str(m_row['phone']),
-                                    "whatsapp": str(m_row['whatsapp']), "natchathiram": str(m_row['natchathiram']),
-                                    "dob": format_date_for_db(m_row['dob']), "wedding_date": format_date_for_db(m_row['wedding_date']),
-                                    "yearly_pooja_date": format_date_for_db(m_row['yearly_pooja_date'])
-                                }
-                                run_supabase_insert("members", m_data)
-                    st.success(f"Uploaded {success_count} families!")
+                    current_fid = None
+                    
+                    # Columns from your file format
+                    col_sl = "வரிசை எண்"
+                    col_name = "பெயர்"
+                    col_addr = "முகவரி"
+                    col_mob = "மொபைல் எண்"
+                    col_wa = "வாட்ஸ் அப் எண்"
+                    col_mem_name = "உறுப்பினர்கள்"
+                    col_rel = "உறவு முறை"
+                    col_dob = "பிறந்த நாள்"
+                    col_star = "நட்சத்திரம்"
+                    col_wed = "திருமண நாள்"
+                    col_pj = "வருஷபூஜை"
+
+                    for _, row in bulk_df.iterrows():
+                        is_head = str(row.get(col_rel, "")).strip() in ["குடும்பதலைவர்", "குடும்ப தலைவர்"] or not pd.isna(row.get(col_sl))
+                        
+                        if is_head and not pd.isna(row.get(col_name)) and str(row.get(col_name)).strip() != "":
+                            # Insert New Family Head
+                            head_data = {
+                                "head_name": str(row[col_name]),
+                                "address": str(row[col_addr]),
+                                "phone": str(row[col_mob]),
+                                "whatsapp": str(row[col_wa]),
+                                "natchathiram": str(row[col_star]),
+                                "dob": format_date_for_db(row[col_dob]),
+                                "wedding_date": format_date_for_db(row[col_wed]),
+                                "yearly_pooja_date": format_date_for_db(row[col_pj])
+                            }
+                            h_res = run_supabase_insert("families", head_data)
+                            if h_res and h_res.data:
+                                current_fid = h_res.data[0]['id']
+                                success_count += 1
+                        
+                        elif current_fid and not pd.isna(row.get(col_mem_name)) and str(row.get(col_mem_name)).strip() != "":
+                            # Insert Family Member linked to current head
+                            m_data = {
+                                "family_id": current_fid,
+                                "member_name": str(row[col_mem_name]),
+                                "relationship": str(row[col_rel]),
+                                "phone": "", # Members usually share head's contact in your file
+                                "whatsapp": "",
+                                "natchathiram": str(row[col_star]),
+                                "dob": format_date_for_db(row[col_dob]),
+                                "wedding_date": format_date_for_db(row[col_wed]),
+                                "yearly_pooja_date": format_date_for_db(row[col_pj])
+                            }
+                            run_supabase_insert("members", m_data)
+                    
+                    st.success(f"Successfully uploaded {success_count} families!")
+                    st.rerun()
             except Exception as e:
-                st.error(f"Failed: {e}")
+                st.error(f"Failed to process file: {e}")
 
 elif st.session_state.current_page == "Search":
     page_header()
@@ -603,7 +636,8 @@ elif st.session_state.current_page == "Search":
                     all_rows.append({
                         "fid": f['id'], "pid": m['id'], "ish": False,
                         "Family Head Name": f['head_name'], "Address": f['address'],
-                        "Mobile No": m['phone'], "WhatsApp No": m['whatsapp'],
+                        "Mobile No": m['phone'] if m['phone'] else f['phone'], 
+                        "WhatsApp No": m['whatsapp'] if m['whatsapp'] else f['whatsapp'],
                         "Family Member Name": m['member_name'], "Relationship": m['relationship'],
                         "DOB": m['dob'], "Natchathiram": m['natchathiram'],
                         "Wedding Day": m['wedding_date'], "Yearly Pooja": m['yearly_pooja_date']
@@ -652,7 +686,6 @@ elif st.session_state.current_page == "Search":
                         e_h_wa = st.text_input("WhatsApp", value=curr_head['whatsapp'])
                         e_h_addr = st.text_area("Address", value=curr_head['address'])
                         e_h_star = st.selectbox("Star", NATCHATHIRAM_OPTIONS, index=NATCHATHIRAM_OPTIONS.index(curr_head['natchathiram']) if curr_head['natchathiram'] in NATCHATHIRAM_OPTIONS else 0)
-                        
                         e_h_dob = st.date_input("DOB", value=safe_date_convert(curr_head['dob']), min_value=MIN_DATE)
                         e_h_wed = st.date_input("Wedding Day", value=safe_date_convert(curr_head['wedding_date']), min_value=MIN_DATE)
                         e_h_pj = st.date_input("Yearly Pooja", value=safe_date_convert(curr_head['yearly_pooja_date']))
@@ -680,7 +713,6 @@ elif st.session_state.current_page == "Search":
                             e_m_phone = st.text_input("Phone", value=curr_mem['phone'] if curr_mem['phone'] else "")
                             e_m_wa = st.text_input("WhatsApp", value=curr_mem['whatsapp'] if curr_mem['whatsapp'] else "")
                             e_m_star = st.selectbox("Star", NATCHATHIRAM_OPTIONS, index=NATCHATHIRAM_OPTIONS.index(curr_mem['natchathiram']) if curr_mem['natchathiram'] in NATCHATHIRAM_OPTIONS else 0)
-                            
                             e_m_dob = st.date_input("DOB", value=safe_date_convert(curr_mem['dob']), min_value=MIN_DATE)
                             e_m_wed = st.date_input("Wedding Day", value=safe_date_convert(curr_mem['wedding_date']), min_value=MIN_DATE)
                             e_m_pj = st.date_input("Yearly Pooja", value=safe_date_convert(curr_mem['yearly_pooja_date']))
@@ -754,9 +786,8 @@ elif st.session_state.current_page == "Billing":
                         opts[key] = {"id": f['id'], "name": f['head_name'], "address": f['address'], "wa": f['whatsapp'] if f['whatsapp'] else f['phone']}
                     for _, m in m_data.iterrows():
                         key = f"{m['member_name']} ({m['relationship']})"
-                        # Fetch head address for members
                         h_addr = f_data[f_data['id'] == m['family_id']]['address'].values[0] if not f_data[f_data['id'] == m['family_id']].empty else "N/A"
-                        opts[key] = {"id": m['family_id'], "name": m['member_name'], "address": h_addr, "wa": m['whatsapp'] if m['whatsapp'] else m['phone']}
+                        opts[key] = {"id": m['family_id'], "name": m['member_name'], "address": h_addr, "wa": m['whatsapp'] if m['whatsapp'] else (m['phone'] if m['phone'] else opts.get(f"{f_data[f_data['id'] == m['family_id']]['head_name'].values[0]} (Head)", {}).get("wa", ""))}
                     sel_k = st.selectbox("Select Devotee", list(opts.keys()))
                     d_obj = opts[sel_k]
                     selected_name, selected_id, selected_address, selected_wa = d_obj['name'], d_obj['id'], d_obj['address'], d_obj['wa']
@@ -828,7 +859,7 @@ elif st.session_state.current_page == "Expenses":
 elif st.session_state.current_page == "Reports":
     page_header()
     render_navigation_bar()
-    st.header("Reports")
+    st.header("Financial Reports")
     tr_df = get_data("transactions")
     if not tr_df.empty:
         st.metric("Total Overall Income", f"₹ {tr_df['amount'].sum():,.2f}")
