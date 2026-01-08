@@ -856,14 +856,39 @@ elif st.session_state.current_page == "Expenses":
     cat_df = get_data("expense_categories")
     categories = cat_df['category_name'].tolist() if not cat_df.empty else DEFAULT_EXPENSE_TYPES
 
-    with st.form("exp_f"):
-        en = st.text_input("Title *"); et = st.selectbox("Type", categories)
-        ea = st.number_input("Amount", min_value=0.0); ed = st.date_input("Date", value=date.today())
-        if st.form_submit_button("Record Expense"):
-            if en and ea > 0:
-                run_supabase_insert("users_expenses", {"expense_name": en, "expense_type": et, "amount": ea, "payment_date": str(ed), "status": "Paid"})
-                st.success("Recorded.")
-    st.dataframe(get_data("users_expenses"), use_container_width=True)
+    tab_add, tab_view = st.tabs(["Record Expense", "Expense History"])
+    
+    with tab_add:
+        with st.form("exp_f"):
+            en = st.text_input("Title *"); et = st.selectbox("Type", categories)
+            ea = st.number_input("Amount", min_value=0.0); ed = st.date_input("Date", value=date.today())
+            if st.form_submit_button("Record Expense"):
+                if en and ea > 0:
+                    run_supabase_insert("users_expenses", {"expense_name": en, "expense_type": et, "amount": ea, "payment_date": str(ed), "status": "Paid"})
+                    st.success("Recorded.")
+                    st.rerun()
+
+    with tab_view:
+        exp_df = get_data("users_expenses")
+        if exp_df.empty:
+            st.info("No expenses recorded yet.")
+        else:
+            st.dataframe(exp_df.sort_values('payment_date', ascending=False), use_container_width=True)
+            
+            st.divider()
+            st.subheader("Manage Expenses")
+            for _, row in exp_df.sort_values('payment_date', ascending=False).iterrows():
+                with st.container():
+                    ec1, ec2 = st.columns([4, 1])
+                    with ec1:
+                        st.write(f"**{row['expense_name']}** | {row['expense_type']} | ₹{float(row['amount']):,.2f}")
+                        st.write(f"Date: {row['payment_date']} | Status: {row['status']}")
+                    with ec2:
+                        if st.session_state.role == ADMIN_ROLE:
+                            if st.button("🗑️", key=f"del_exp_{row['id']}"):
+                                run_supabase_delete("users_expenses", row['id'])
+                                st.rerun()
+                st.divider()
 
 elif st.session_state.current_page == "Reports":
     page_header()
