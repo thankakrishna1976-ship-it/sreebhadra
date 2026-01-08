@@ -33,10 +33,10 @@ ADMIN_ROLE = 'admin'
 USER_ROLE = 'user'
 GUEST_FAMILY_ID = 0 
 
-# Dropdown Options
+# Default/Fallback Options
+DEFAULT_EXPENSE_TYPES = ['Pooja Items', 'Maintenance/Repairs', 'Salary/Dakshina', 'Electricity/Water', 'Annadanam/Food', 'Construction', 'Festivals', 'Administrative', 'Other']
 RELATIONSHIP_OPTIONS = ['Wife', 'Son', 'Daughter', 'Mother', 'Father', 'Grand Father', 'Grand Mother', 'Guardian', 'Other']
 NATCHATHIRAM_OPTIONS = ['Ashwini', 'Bharani', 'Karthigai', 'Rohini', 'Mrigasiram', 'Thiruvathirai', 'Punarpoosam', 'Poosam', 'Ayilyam', 'Magam', 'Poorvam', 'Uthiram', 'Hastham', 'Chithirai', 'Swathi', 'Visakam', 'Anusham', 'Kettai', 'Moolam', 'Pooradam', 'Uthiradam', 'Thiruvonam', 'Avittam', 'Sathayam', 'Poorattathi', 'Uthirattathi', 'Revathi']
-EXPENSE_TYPES = ['Pooja Items', 'Maintenance/Repairs', 'Salary/Dakshina', 'Electricity/Water', 'Annadanam/Food', 'Construction', 'Festivals', 'Administrative', 'Other']
 PAYMENT_METHODS = ['Cash', 'UPI / GPay', 'Bank Transfer', 'Cheque', 'Card']
 PAYMENT_STATUS = ['Paid', 'Pending', 'Partial']
 
@@ -511,7 +511,6 @@ elif st.session_state.current_page == "Enroll":
 
     with tab_bulk:
         st.subheader("Bulk Import Devotees")
-        
         # --- SAMPLE EXCEL DOWNLOAD ---
         st.markdown("### 📥 Download Sample Template")
         sample_data = {
@@ -689,6 +688,7 @@ elif st.session_state.current_page == "Search":
                         e_h_wa = st.text_input("WhatsApp", value=curr_head['whatsapp'])
                         e_h_addr = st.text_area("Address", value=curr_head['address'])
                         e_h_star = st.selectbox("Star", NATCHATHIRAM_OPTIONS, index=NATCHATHIRAM_OPTIONS.index(curr_head['natchathiram']) if curr_head['natchathiram'] in NATCHATHIRAM_OPTIONS else 0)
+                        
                         e_h_dob = st.date_input("DOB", value=safe_date_convert(curr_head['dob']), min_value=MIN_DATE)
                         e_h_wed = st.date_input("Wedding Day", value=safe_date_convert(curr_head['wedding_date']), min_value=MIN_DATE)
                         e_h_pj = st.date_input("Yearly Pooja", value=safe_date_convert(curr_head['yearly_pooja_date']))
@@ -716,6 +716,7 @@ elif st.session_state.current_page == "Search":
                             e_m_phone = st.text_input("Phone", value=curr_mem['phone'] if curr_mem['phone'] else "")
                             e_m_wa = st.text_input("WhatsApp", value=curr_mem['whatsapp'] if curr_mem['whatsapp'] else "")
                             e_m_star = st.selectbox("Star", NATCHATHIRAM_OPTIONS, index=NATCHATHIRAM_OPTIONS.index(curr_mem['natchathiram']) if curr_mem['natchathiram'] in NATCHATHIRAM_OPTIONS else 0)
+                            
                             e_m_dob = st.date_input("DOB", value=safe_date_convert(curr_mem['dob']), min_value=MIN_DATE)
                             e_m_wed = st.date_input("Wedding Day", value=safe_date_convert(curr_mem['wedding_date']), min_value=MIN_DATE)
                             e_m_pj = st.date_input("Yearly Pooja", value=safe_date_convert(curr_mem['yearly_pooja_date']))
@@ -850,8 +851,13 @@ elif st.session_state.current_page == "Expenses":
     page_header()
     render_navigation_bar()
     st.header("Expenses")
+    
+    # Dynamic categories from DB
+    cat_df = get_data("expense_categories")
+    categories = cat_df['category_name'].tolist() if not cat_df.empty else DEFAULT_EXPENSE_TYPES
+
     with st.form("exp_f"):
-        en = st.text_input("Title *"); et = st.selectbox("Type", EXPENSE_TYPES)
+        en = st.text_input("Title *"); et = st.selectbox("Type", categories)
         ea = st.number_input("Amount", min_value=0.0); ed = st.date_input("Date", value=date.today())
         if st.form_submit_button("Record Expense"):
             if en and ea > 0:
@@ -882,12 +888,43 @@ elif st.session_state.current_page == "Settings":
     page_header()
     render_navigation_bar()
     st.header("Settings")
-    with st.form("add_svc"):
-        sn = st.text_input("Service Name"); sp = st.number_input("Price", min_value=0.0)
-        if st.form_submit_button("Add Service"):
-            run_supabase_insert("services", {"service_name": sn, "price": sp})
-            st.rerun()
-    st.table(get_data("services"))
+    
+    s_tab1, s_tab2 = st.tabs(["Service Settings", "Expense Type Settings"])
+    
+    with s_tab1:
+        with st.form("add_svc"):
+            sn = st.text_input("Service Name"); sp = st.number_input("Price", min_value=0.0)
+            if st.form_submit_button("Add Service"):
+                run_supabase_insert("services", {"service_name": sn, "price": sp})
+                st.rerun()
+        
+        st.write("Current Services:")
+        serv_list = get_data("services")
+        if not serv_list.empty:
+            for _, srv_row in serv_list.iterrows():
+                sc1, sc2 = st.columns([4, 1])
+                sc1.write(f"{srv_row['service_name']} - ₹{srv_row['price']}")
+                if sc2.button("🗑️", key=f"del_svc_{srv_row['id']}"):
+                    run_supabase_delete("services", srv_row['id'])
+                    st.rerun()
+
+    with s_tab2:
+        with st.form("add_exp_type"):
+            new_cat = st.text_input("New Expense Category Name")
+            if st.form_submit_button("Add Expense Type"):
+                if new_cat:
+                    run_supabase_insert("expense_categories", {"category_name": new_cat})
+                    st.rerun()
+        
+        st.write("Current Expense Categories:")
+        cat_list = get_data("expense_categories")
+        if not cat_list.empty:
+            for _, cat_row in cat_list.iterrows():
+                ec1, ec2 = st.columns([4, 1])
+                ec1.write(cat_row['category_name'])
+                if ec2.button("🗑️", key=f"del_cat_{cat_row['id']}"):
+                    run_supabase_delete("expense_categories", cat_row['id'])
+                    st.rerun()
 
 elif st.session_state.current_page == "Users":
     page_header()
