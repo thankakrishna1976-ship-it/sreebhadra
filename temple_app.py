@@ -98,6 +98,16 @@ def format_date_for_db(val):
         return val.strftime('%Y-%m-%d')
     return str(val)
 
+def format_date_for_ui(val):
+    """Converts YYYY-MM-DD from database to DD/MM/YYYY for tabular display."""
+    if not val or str(val).lower() in ["none", "nat", ""]:
+        return ""
+    try:
+        d_obj = pd.to_datetime(val)
+        return d_obj.strftime('%d/%m/%Y')
+    except:
+        return str(val)
+
 def get_base64_of_bin_file(bin_file):
     try:
         if os.path.exists(bin_file):
@@ -377,7 +387,7 @@ if st.session_state.current_page == "Home Dashboard":
     render_news_ticker()
     st.title(f"Welcome, {st.session_state.username.title()}")
     
-    # Financial Filtering Logic
+    # Financial Overview Calculation
     today = date.today()
     start_of_week = today - timedelta(days=today.weekday())
     start_of_month = today.replace(day=1)
@@ -386,13 +396,13 @@ if st.session_state.current_page == "Home Dashboard":
     df_trans = get_data("transactions")
     df_exp_all = get_data("users_expenses")
     
-    # Convert dates to datetime objects for filtering
+    # Convert dates for accurate filtering
     if not df_trans.empty:
         df_trans['date_obj'] = pd.to_datetime(df_trans['date']).dt.date
     if not df_exp_all.empty:
         df_exp_all['date_obj'] = pd.to_datetime(df_exp_all['payment_date']).dt.date
 
-    def calc_stats(start_d, end_d):
+    def calc_finances(start_d, end_d):
         inc = 0
         exp = 0
         if not df_trans.empty:
@@ -402,19 +412,18 @@ if st.session_state.current_page == "Home Dashboard":
         return inc, exp, (inc - exp)
 
     stats = {
-        "Daily": calc_stats(today, today),
-        "Weekly": calc_stats(start_of_week, today),
-        "Monthly": calc_stats(start_of_month, today),
-        "Yearly": calc_stats(start_of_year, today)
+        "Daily": calc_finances(today, today),
+        "Weekly": calc_finances(start_of_week, today),
+        "Monthly": calc_finances(start_of_month, today),
+        "Yearly": calc_finances(start_of_year, today)
     }
 
-    # Display Stats
     for label, (inc, exp, net) in stats.items():
         st.subheader(f"📊 {label} Overview")
         c1, c2, c3 = st.columns(3)
         c1.metric(f"{label} Income", f"₹ {inc:,.2f}")
         c2.metric(f"{label} Expense", f"₹ {exp:,.2f}")
-        c3.metric(f"{label} Net Profit", f"₹ {net:,.2f}")
+        c3.metric(f"{label} Net Profit", f"₹ {net:,.2f}", delta_color="normal")
         st.divider()
 
     df_fam = get_data("families")
@@ -492,7 +501,6 @@ elif st.session_state.current_page == "Enroll":
 
     with tab_bulk:
         st.subheader("Bulk Import Devotees")
-        
         # --- SAMPLE EXCEL DOWNLOAD ---
         st.markdown("### 📥 Download Sample Template")
         sample_data = {
@@ -520,332 +528,273 @@ elif st.session_state.current_page == "Enroll":
         st.divider()
         st.info("""
             **Excel Format Instructions:**
-            1. **family_tag**: Use the same unique text/number for a head and their members (e.g., 'F1', 'F2').
-            2. **relationship**: Enter 'Head' for the family head. For others, enter 'Wife', 'Son', etc.
-            3. **Other columns**: `name`, `phone`, `whatsapp`, `address`, `dob`, `wedding_date`, `natchathiram`, `yearly_pooja_date`.
+            1. **family_tag**: Use the same unique ID for a head and their members.
+            2. **relationship**: Enter 'Head' for the head, others use 'Wife', 'Son', etc.
+            3. **Date format**: Use YYYY-MM-DD for dates in the Excel sheet.
         """)
         
         uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
         if uploaded_file:
             try:
-                # Use engine='openpyxl' for .xlsx
                 bulk_df = pd.read_excel(uploaded_file, engine='openpyxl')
-                st.write("Preview of data:")
                 st.dataframe(bulk_df.head())
-                
                 if st.button("🚀 Process Bulk Upload"):
                     success_count = 0
-                    # Sort so Head is processed first within groups if not already
                     for tag, group in bulk_df.groupby('family_tag'):
                         head_mask = group['relationship'].astype(str).str.lower() == 'head'
-                        if not head_mask.any():
-                            st.error(f"Error: Family Tag '{tag}' has no 'Head' defined. Skipping.")
-                            continue
-                        
+                        if not head_mask.any(): continue
                         head_row = group[head_mask].iloc[0]
                         head_data = {
-                            "head_name": str(head_row['name']),
-                            "phone": str(head_row['phone']),
-                            "whatsapp": str(head_row['whatsapp']),
-                            "address": str(head_row['address']),
-                            "natchathiram": str(head_row['natchathiram']),
-                            "dob": format_date_for_db(head_row['dob']),
+                            "head_name": str(head_row['name']), "phone": str(head_row['phone']),
+                            "whatsapp": str(head_row['whatsapp']), "address": str(head_row['address']),
+                            "natchathiram": str(head_row['natchathiram']), "dob": format_date_for_db(head_row['dob']),
                             "wedding_date": format_date_for_db(head_row['wedding_date']),
                             "yearly_pooja_date": format_date_for_db(head_row['yearly_pooja_date'])
                         }
-                        
                         h_res = run_supabase_insert("families", head_data)
                         if h_res and h_res.data:
-                            new_family_id = h_res.data[0]['id']
+                            new_fid = h_res.data[0]['id']
                             success_count += 1
-                            members_rows = group[~head_mask]
-                            for _, m_row in members_rows.iterrows():
+                            for _, m_row in group[~head_mask].iterrows():
                                 m_data = {
-                                    "family_id": new_family_id,
-                                    "member_name": str(m_row['name']),
-                                    "relationship": str(m_row['relationship']),
-                                    "phone": str(m_row['phone']),
-                                    "whatsapp": str(m_row['whatsapp']),
-                                    "natchathiram": str(m_row['natchathiram']),
-                                    "dob": format_date_for_db(m_row['dob']),
-                                    "wedding_date": format_date_for_db(m_row['wedding_date']),
+                                    "family_id": new_fid, "member_name": str(m_row['name']),
+                                    "relationship": str(m_row['relationship']), "phone": str(m_row['phone']),
+                                    "whatsapp": str(m_row['whatsapp']), "natchathiram": str(m_row['natchathiram']),
+                                    "dob": format_date_for_db(m_row['dob']), "wedding_date": format_date_for_db(m_row['wedding_date']),
                                     "yearly_pooja_date": format_date_for_db(m_row['yearly_pooja_date'])
                                 }
                                 run_supabase_insert("members", m_data)
-                    st.success(f"Successfully uploaded {success_count} families!")
-            except ImportError:
-                st.error("Missing optional dependency 'openpyxl'. Please ensure it is added to your requirements.txt file.")
+                    st.success(f"Uploaded {success_count} families!")
             except Exception as e:
-                st.error(f"Failed to process file: {e}")
+                st.error(f"Failed: {e}")
 
 elif st.session_state.current_page == "Search":
     page_header()
     render_navigation_bar()
     st.header("Search & Manage Devotees")
-    search_term = st.text_input("Search by Name or Mobile No.")
-    df = get_data("families")
-    if not df.empty:
-        if search_term:
-            df = df[df['head_name'].astype(str).str.contains(search_term, case=False, na=False) | df['phone'].astype(str).str.contains(search_term, na=False)]
-        
-        if df.empty:
-            st.info("No matching devotees found.")
-        else:
-            for idx, row in df.iterrows():
-                with st.container():
-                    c_img, c_detail = st.columns([1, 6])
-                    with c_img:
-                        img_data = base64_to_image(row['photo'])
-                        if img_data: st.image(img_data, width=100)
-                        else: st.markdown("👤")
-                    with c_detail:
-                        st.subheader(row['head_name'])
-                        st.write(f"📞 {row['phone']} | ⭐ {row['natchathiram'] or 'N/A'} | 🏠 {row['address']}")
-                        with st.expander("⚙️ Manage Account"):
-                            st.write("👨‍👩‍👧 **Family Members**")
-                            members = get_data("members")
-                            if not members.empty:
-                                fam_m = members[members['family_id'] == row['id']]
-                                if fam_m.empty:
-                                    st.write("No members added.")
-                                else:
-                                    for _, m in fam_m.iterrows():
-                                        col_m1, col_m2 = st.columns([4, 1])
-                                        m_dob_fmt = datetime.strptime(m['dob'], '%Y-%m-%d').strftime('%d/%m/%Y') if m['dob'] else "N/A"
-                                        col_m1.write(f"- **{m['member_name']}** ({m['relationship']}) | DOB: {m_dob_fmt}")
-                                        if col_m2.button("🗑️", key=f"del_mem_{m['id']}"):
-                                            run_supabase_delete("members", m['id'])
-                                            st.rerun()
-                            
-                            st.divider()
-                            st.write("🗑️ **Danger Zone**")
-                            if st.button(f"Delete Account: {row['head_name']}", key=f"del_{row['id']}"):
-                                supabase.table("members").delete().eq("family_id", row['id']).execute()
-                                run_supabase_delete("families", row['id'])
-                                st.rerun()
+    
+    fams = get_data("families")
+    mems = get_data("members")
+    
+    if fams.empty:
+        st.info("No devotees enrolled yet.")
     else:
-        st.info("Enrollment database is empty.")
+        # Prepare Flattened Table Data
+        all_rows = []
+        for _, f in fams.iterrows():
+            # Add Row for Head
+            all_rows.append({
+                "fid": f['id'], "pid": f['id'], "ish": True,
+                "Family Head Name": f['head_name'],
+                "Address": f['address'],
+                "Mobile No": f['phone'],
+                "WhatsApp No": f['whatsapp'],
+                "Family Member Name": f['head_name'],
+                "Relationship": "Head",
+                "DOB": f['dob'],
+                "Natchathiram": f['natchathiram'],
+                "Wedding Day": f['wedding_date'],
+                "Yearly Pooja": f['yearly_pooja_date']
+            })
+            # Add Rows for Members
+            if not mems.empty:
+                f_mems = mems[mems['family_id'] == f['id']]
+                for _, m in f_mems.iterrows():
+                    all_rows.append({
+                        "fid": f['id'], "pid": m['id'], "ish": False,
+                        "Family Head Name": f['head_name'],
+                        "Address": f['address'],
+                        "Mobile No": f['phone'],
+                        "WhatsApp No": f['whatsapp'],
+                        "Family Member Name": m['member_name'],
+                        "Relationship": m['relationship'],
+                        "DOB": m['dob'],
+                        "Natchathiram": m['natchathiram'],
+                        "Wedding Day": m['wedding_date'],
+                        "Yearly Pooja": m['yearly_pooja_date']
+                    })
+        
+        full_df = pd.DataFrame(all_rows)
+        
+        search_term = st.text_input("Search by Name, Mobile, or Address")
+        if search_term:
+            s_mask = (full_df['Family Head Name'].str.contains(search_term, case=False, na=False) |
+                      full_df['Family Member Name'].str.contains(search_term, case=False, na=False) |
+                      full_df['Mobile No'].str.contains(search_term, na=False) |
+                      full_df['Address'].str.contains(search_term, case=False, na=False))
+            full_df = full_df[s_mask]
+        
+        if full_df.empty:
+            st.warning("No records found.")
+        else:
+            display_df = full_df.copy()
+            display_df['DOB'] = display_df['DOB'].apply(format_date_for_ui)
+            display_df['Wedding Day'] = display_df['Wedding Day'].apply(format_date_for_ui)
+            display_df['Yearly Pooja'] = display_df['Yearly Pooja'].apply(format_date_for_ui)
+            
+            # Add SL.NO
+            display_df = display_df.reset_index(drop=True)
+            display_df.insert(0, 'Sl.No', display_df.index + 1)
+            
+            final_cols = ['Sl.No', 'Family Head Name', 'Address', 'Mobile No', 'WhatsApp No', 
+                         'Family Member Name', 'Relationship', 'DOB', 'Natchathiram', 
+                         'Wedding Day', 'Yearly Pooja']
+            
+            st.dataframe(display_df[final_cols], hide_index=True, use_container_width=True)
+            
+            # Management (Delete Logic)
+            st.divider()
+            st.subheader("⚙️ Account Management")
+            m_col1, m_col2 = st.columns(2)
+            
+            with m_col1:
+                st.write("🗑️ **Delete Individual Member**")
+                del_mems = full_df[full_df['ish'] == False]
+                if not del_mems.empty:
+                    m_dict = {f"{r['Family Member Name']} ({r['Relationship']}) - Head: {r['Family Head Name']}": r['pid'] for _, r in del_mems.iterrows()}
+                    m_sel = st.selectbox("Select Member", list(m_dict.keys()))
+                    if st.button("Delete Individual Member"):
+                        run_supabase_delete("members", m_dict[m_sel])
+                        st.rerun()
+                else: st.info("No members available to delete.")
+            
+            with m_col2:
+                st.write("🗑️ **Delete Entire Family**")
+                unique_f = full_df.drop_duplicates('fid')
+                f_dict = {f"{r['Family Head Name']} (ID: {r['fid']})": r['fid'] for _, r in unique_f.iterrows()}
+                f_sel = st.selectbox("Select Family Head", list(f_dict.keys()))
+                if st.button("Delete Family Head & All Members"):
+                    supabase.table("members").delete().eq("family_id", f_dict[f_sel]).execute()
+                    run_supabase_delete("families", f_dict[f_sel])
+                    st.rerun()
 
 elif st.session_state.current_page == "Billing":
     page_header()
     render_navigation_bar()
     st.header("Billing Desk")
-    
-    # Billing Layout with Tabs
-    bill_tab1, bill_tab2 = st.tabs(["Billing Desk", "Manage Bills History"])
+    bill_tab1, bill_tab2 = st.tabs(["New Bill", "Bill History"])
     
     with bill_tab1:
         billing_mode = st.radio("Billing Mode", ["Enrolled Devotee", "Guest Devotee"], horizontal=True)
         col1, col2 = st.columns([2, 1])
         with col1:
-            selected_name = ""; selected_wa = ""; selected_id = 0; selected_address = ""
-            
+            selected_name, selected_wa, selected_id, selected_address = "", "", 0, ""
             if billing_mode == "Enrolled Devotee":
-                fams = get_data("families")
-                mems = get_data("members")
-                
-                if not fams.empty:
-                    # Combine Heads and Members for selection
-                    devotees_options = {}
-                    for _, f in fams.iterrows():
-                        key = f"{f['head_name']} (Head) - {f['phone']}"
-                        devotees_options[key] = {
-                            "id": f['id'], "name": f['head_name'], "address": f['address'],
-                            "wa": str(f['whatsapp']).strip() if str(f['whatsapp']).strip() else str(f['phone']).strip()
-                        }
-                    
-                    if not mems.empty:
-                        for _, m in mems.iterrows():
-                            head_name = fams[fams['id'] == m['family_id']]['head_name'].values[0] if not fams[fams['id'] == m['family_id']].empty else "Unknown"
-                            key = f"{m['member_name']} ({m['relationship']}) - Head: {head_name}"
-                            devotees_options[key] = {
-                                "id": m['family_id'], "name": m['member_name'], 
-                                "address": fams[fams['id'] == m['family_id']]['address'].values[0] if not fams[fams['id'] == m['family_id']].empty else "N/A",
-                                "wa": str(m['whatsapp']).strip() if str(m['whatsapp']).strip() else (str(m['phone']).strip() if str(m['phone']).strip() else devotees_options.get(f"{head_name} (Head)", {}).get("wa", ""))
-                            }
-                    
-                    sel_key = st.selectbox("Select Devotee (Heads & Members)", list(devotees_options.keys()))
-                    dev_data = devotees_options[sel_key]
-                    selected_name, selected_id, selected_address, selected_wa = dev_data['name'], dev_data['id'], dev_data['address'], dev_data['wa']
-                else:
-                    st.warning("Enroll a devotee first.")
+                f_data = get_data("families")
+                m_data = get_data("members")
+                if not f_data.empty:
+                    opts = {}
+                    for _, f in f_data.iterrows():
+                        key = f"{f['head_name']} (Head)"
+                        opts[key] = {"id": f['id'], "name": f['head_name'], "address": f['address'], "wa": f['whatsapp'] if f['whatsapp'] else f['phone']}
+                    for _, m in m_data.iterrows():
+                        key = f"{m['member_name']} ({m['relationship']})"
+                        opts[key] = {"id": m['family_id'], "name": m['member_name'], "address": "Family Address", "wa": m['whatsapp'] if m['whatsapp'] else m['phone']}
+                    sel_k = st.selectbox("Select Devotee", list(opts.keys()))
+                    d_obj = opts[sel_k]
+                    selected_name, selected_id, selected_address, selected_wa = d_obj['name'], d_obj['id'], d_obj['address'], d_obj['wa']
+                else: st.warning("Enroll devotees first.")
             else:
                 selected_name = st.text_input("Guest Name *")
                 selected_address = st.text_area("Guest Address")
                 selected_wa = st.text_input("Guest WhatsApp No.")
 
-            services = get_data("services")
-            if not services.empty:
-                serv_dict = {r['service_name']: r for _, r in services.iterrows()}
-                sel_s = st.selectbox("Select Service", list(serv_dict.keys()))
-                service = serv_dict[sel_s]
+            servs = get_data("services")
+            if not servs.empty:
+                s_dict = {r['service_name']: r for _, r in servs.iterrows()}
+                sel_s = st.selectbox("Select Service", list(s_dict.keys()))
+                srv = s_dict[sel_s]
                 man_no = st.text_input("Manual Bill No."); book_no = st.text_input("Bill Book No.")
-                
                 if st.button("Generate Receipt"):
-                    if billing_mode == "Guest Devotee" and not selected_name:
-                        st.error("Enter Guest Name.")
+                    if billing_mode == "Guest Devotee" and not selected_name: st.error("Enter Name.")
                     else:
                         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        data = {
-                            "family_id": selected_id, 
-                            "service_id": service['id'], 
-                            "amount": service['price'], 
-                            "date": now, 
-                            "manual_bill_no": man_no, 
-                            "bill_book_no": book_no, 
-                            "guest_name": selected_name if selected_id == 0 else "", 
-                            "guest_address": selected_address if selected_id == 0 else "",
-                            "guest_whatsapp": selected_wa
-                        }
-                        res = run_supabase_insert("transactions", data)
+                        payload = {"family_id": selected_id, "service_id": srv['id'], "amount": srv['price'], "date": now, "manual_bill_no": man_no, "bill_book_no": book_no, "guest_name": selected_name if selected_id == 0 else "", "guest_address": selected_address, "guest_whatsapp": selected_wa}
+                        res = run_supabase_insert("transactions", payload)
                         if res and res.data:
                             last_id = res.data[0]['id']
-                            pdf = generate_pdf(last_id, selected_name, selected_address, sel_s, service['price'], now, man_no, book_no)
-                            st.success("Receipt generated successfully!")
-                            
-                            col_dl1, col_dl2 = st.columns(2)
-                            with col_dl1:
-                                st.download_button("📥 Download PDF Receipt", pdf, f"Receipt_{last_id}.pdf", "application/pdf", use_container_width=True)
-                            
+                            pdf = generate_pdf(last_id, selected_name, selected_address, sel_s, srv['price'], now, man_no, book_no)
+                            st.success("Bill Generated!")
+                            c_dl1, c_dl2 = st.columns(2)
+                            with c_dl1: st.download_button("📥 PDF Receipt", pdf, f"Rec_{last_id}.pdf")
                             if selected_wa:
-                                msg = (
-                                    f"🙏 *{TEMPLE_NAME_FULL}*\n\n"
-                                    f"Namaste *{selected_name}*,\n"
-                                    f"Receipt No: *#{last_id}*\n"
-                                    f"Manual No: *{man_no if man_no else 'N/A'}*\n"
-                                    f"Book No: *{book_no if book_no else 'N/A'}*\n"
-                                    f"Service: *{sel_s}*\n"
-                                    f"Amount Paid: *₹{service['price']:,.2f}*\n"
-                                    f"Date: *{now}*\n\n"
-                                    f"May the blessings of Amman be with you. ✨"
-                                )
-                                clean_wa = "".join(filter(str.isdigit, str(selected_wa)))
-                                if len(clean_wa) == 10: clean_wa = "91" + clean_wa
-                                encoded_msg = msg.replace(' ', '%20').replace('\n', '%0A').replace('#', '%23').replace('*', '%2A')
-                                with col_dl2:
-                                    st.link_button("📲 Send WhatsApp Summary", f"https://wa.me/{clean_wa}?text={encoded_msg}", use_container_width=True)
-            else:
-                st.warning("Please add services in Settings first.")
-        
+                                msg = f"🙏 *{TEMPLE_NAME_FULL}*\nNamaste *{selected_name}*,\nReceipt: *#{last_id}*\nManual: *{man_no}*\nBook: *{book_no}*\nService: *{sel_s}*\nAmount: *₹{srv['price']:,.2f}*\nDate: *{now}*"
+                                encoded = msg.replace(' ', '%20').replace('\n', '%0A').replace('#', '%23').replace('*', '%2A')
+                                with c_dl2: st.link_button("📲 Send WhatsApp", f"https://wa.me/{selected_wa}?text={encoded}")
+            else: st.warning("Add services in Settings.")
         with col2:
-            st.subheader("Recent Bills")
-            history_df = get_data("transactions")
-            if not history_df.empty:
-                # Basic display
-                history_df['display_name'] = history_df.apply(lambda r: r['guest_name'] if r['family_id'] == 0 else "Enrolled Devotee", axis=1)
-                st.dataframe(history_df[['id', 'amount', 'display_name']].sort_values('id', ascending=False).head(10), hide_index=True)
+            st.subheader("Last 10 Bills")
+            tr_history = get_data("transactions")
+            if not tr_history.empty:
+                st.dataframe(tr_history[['id', 'amount', 'date']].sort_values('id', ascending=False).head(10), hide_index=True)
 
     with bill_tab2:
-        st.subheader("Search & Manage Generated Bills")
-        trans_df = get_data("transactions")
-        serv_df = get_data("services")
-        
-        if trans_df.empty:
-            st.info("No bills found in the database.")
-        else:
-            search_bill = st.text_input("Search Bill by Receipt No or Guest Name")
-            if search_bill:
-                trans_df = trans_df[trans_df['id'].astype(str).str.contains(search_bill) | trans_df['guest_name'].str.contains(search_bill, case=False, na=False)]
-            
-            for _, tr in trans_df.sort_values('id', ascending=False).iterrows():
+        st.subheader("Manage Bills")
+        tr_df = get_data("transactions")
+        sv_df = get_data("services")
+        if not tr_df.empty:
+            for _, r in tr_df.sort_values('id', ascending=False).iterrows():
                 with st.container():
-                    b_col1, b_col2 = st.columns([3, 1])
-                    s_name = serv_df[serv_df['id'] == tr['service_id']]['service_name'].values[0] if not serv_df[serv_df['id'] == tr['service_id']].empty else "Unknown Service"
-                    dev_name = tr['guest_name'] if tr['family_id'] == 0 else "Enrolled Devotee (See Profile)"
-                    
-                    with b_col1:
-                        st.markdown(f"**Receipt #{tr['id']}** | {dev_name} | {s_name} | ₹{tr['amount']:,.2f}")
-                        st.write(f"Date: {tr['date']} | Manual No: {tr['manual_bill_no']} | Book No: {tr['bill_book_no']}")
-                    
-                    with b_col2:
-                        wa_num = tr['guest_whatsapp']
-                        if wa_num:
-                            msg_anytime = (
-                                f"🙏 *{TEMPLE_NAME_FULL}*\n\n"
-                                f"Namaste,\n"
-                                f"Receipt No: *#{tr['id']}*\n"
-                                f"Manual No: *{tr['manual_bill_no'] if tr['manual_bill_no'] else 'N/A'}*\n"
-                                f"Book No: *{tr['bill_book_no'] if tr['bill_book_no'] else 'N/A'}*\n"
-                                f"Service: *{s_name}*\n"
-                                f"Amount Paid: *₹{tr['amount']:,.2f}*\n"
-                                f"Date: *{tr['date']}*\n\n"
-                                f"May the blessings of Amman be with you. ✨"
-                            )
-                            clean_wa_anytime = "".join(filter(str.isdigit, str(wa_num)))
-                            if len(clean_wa_anytime) == 10: clean_wa_anytime = "91" + clean_wa_anytime
-                            encoded_msg_anytime = msg_anytime.replace(' ', '%20').replace('\n', '%0A').replace('#', '%23').replace('*', '%2A')
-                            st.link_button("📲 Resend WhatsApp", f"https://wa.me/{clean_wa_anytime}?text={encoded_msg_anytime}", use_container_width=True)
-                        
+                    col_b1, col_b2 = st.columns([4, 1])
+                    s_nm = sv_df[sv_df['id'] == r['service_id']]['service_name'].values[0] if not sv_df[sv_df['id'] == r['service_id']].empty else "Service"
+                    with col_b1: st.write(f"**Receipt #{r['id']}** | {r['guest_name'] if r['family_id']==0 else 'Enrolled'} | {s_nm} | ₹{r['amount']}")
+                    with col_b2:
                         if st.session_state.role == ADMIN_ROLE:
-                            if st.button("🗑️ Delete Bill", key=f"del_bill_{tr['id']}", use_container_width=True):
-                                run_supabase_delete("transactions", tr['id'])
+                            if st.button("🗑️", key=f"del_b_{r['id']}"): 
+                                run_supabase_delete("transactions", r['id'])
                                 st.rerun()
                 st.divider()
 
 elif st.session_state.current_page == "Expenses":
     page_header()
     render_navigation_bar()
-    st.header("Expense Management")
-    tab_add, tab_view = st.tabs(["Record Expense", "Expense History"])
-    with tab_add:
-        with st.form("add_expense"):
-            en = st.text_input("Expense Title *"); et = st.selectbox("Category", EXPENSE_TYPES)
-            ea = st.number_input("Amount (₹)", min_value=0.0); ed = st.date_input("Date", value=date.today())
-            em = st.selectbox("Payment Method", PAYMENT_METHODS); es = st.selectbox("Status", PAYMENT_STATUS)
-            ev = st.text_input("Voucher / Bill No."); desc = st.text_area("Description")
-            if st.form_submit_button("Save Expense"):
-                if en and ea > 0:
-                    run_supabase_insert("users_expenses", {"expense_name": en, "expense_type": et, "amount": ea, "payment_date": str(ed), "payment_method": em, "status": es, "voucher_no": ev, "description": desc})
-                    st.success("Expense saved.")
-    with tab_view:
-        st.dataframe(get_data("users_expenses"), use_container_width=True)
+    st.header("Expenses")
+    with st.form("exp_f"):
+        en = st.text_input("Title *"); et = st.selectbox("Type", EXPENSE_TYPES)
+        ea = st.number_input("Amount", min_value=0.0); ed = st.date_input("Date", value=date.today())
+        if st.form_submit_button("Record Expense"):
+            if en and ea > 0:
+                run_supabase_insert("users_expenses", {"expense_name": en, "expense_type": et, "amount": ea, "payment_date": str(ed), "status": "Paid"})
+                st.success("Recorded.")
+    st.dataframe(get_data("users_expenses"), use_container_width=True)
 
 elif st.session_state.current_page == "Reports":
     page_header()
     render_navigation_bar()
-    st.header("Financial Reports")
-    df_i = get_data("transactions")
-    if not df_i.empty:
-        st.metric("Total Overall Income", f"₹ {df_i['amount'].sum():,.2f}")
-        st.dataframe(df_i, use_container_width=True)
-    else:
-        st.info("No transaction data available for reports.")
+    st.header("Reports")
+    tr_df = get_data("transactions")
+    if not tr_df.empty:
+        st.metric("Total Overall Income", f"₹ {tr_df['amount'].sum():,.2f}")
+        st.dataframe(tr_df, use_container_width=True)
+    else: st.info("No data.")
 
 elif st.session_state.current_page == "Assets":
     page_header()
     render_navigation_bar()
-    st.header("Asset Management")
-    with st.expander("Register Asset"):
-        with st.form("asset_f"):
-            an = st.text_input("Asset Name *"); ad = st.text_input("Description")
-            av = st.number_input("Value", min_value=0.0); aq = st.number_input("Qty", min_value=1)
-            if st.form_submit_button("Save"):
-                run_supabase_insert("assets", {"asset_name": an, "description": ad, "value": av, "quantity": aq})
+    st.header("Assets")
+    with st.form("ast_f"):
+        an = st.text_input("Asset Name"); av = st.number_input("Value")
+        if st.form_submit_button("Save"): run_supabase_insert("assets", {"asset_name": an, "value": av})
     st.dataframe(get_data("assets"), use_container_width=True)
 
 elif st.session_state.current_page == "Settings":
     page_header()
     render_navigation_bar()
     st.header("Settings")
-    with st.form("add_svc"):
-        sn = st.text_input("Service Name"); sp = st.number_input("Price", min_value=0.0)
-        if st.form_submit_button("Add Service"):
-            run_supabase_insert("services", {"service_name": sn, "price": sp})
-            st.rerun()
+    with st.form("svc_f"):
+        sn = st.text_input("Service Name"); sp = st.number_input("Price")
+        if st.form_submit_button("Add"): run_supabase_insert("services", {"service_name": sn, "price": sp})
     st.table(get_data("services"))
 
 elif st.session_state.current_page == "Users":
     page_header()
     render_navigation_bar()
-    st.header("User Management")
+    st.header("Users")
     if st.session_state.role == ADMIN_ROLE:
-        with st.form("user_f"):
-            un = st.text_input("Username"); up = st.text_input("Password", type="password")
-            ur = st.selectbox("Role", [USER_ROLE, ADMIN_ROLE])
+        with st.form("u_f"):
+            un = st.text_input("User"); up = st.text_input("Pass", type="password")
             if st.form_submit_button("Create"):
-                run_supabase_insert("users", {"username": un, "password_hash": hash_password(up), "role": ur})
+                run_supabase_insert("users", {"username": un, "password_hash": hash_password(up), "role": "user"})
         st.dataframe(get_data("users", "id, username, role"), use_container_width=True)
-    else:
-        st.error("Admin access required.")
 
 render_footer()
