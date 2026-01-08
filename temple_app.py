@@ -43,6 +43,9 @@ PAYMENT_STATUS = ['Paid', 'Pending', 'Partial']
 MIN_DATE = date(1940, 1, 1)
 MAX_DATE = date(2040, 12, 31)
 
+# Menu Keys for Rights Management
+ALL_MENU_KEYS = ["Home Dashboard", "Enroll", "Search", "Billing", "Expenses", "Reports", "Assets", "Settings"]
+
 # TEMPLE DETAILS
 TEMPLE_NAME_FULL = "Sree Bhadreshwari Amman Temple Management System"
 TRUST_DETAILS = "Samrakshana Seva Trust 174/2004"
@@ -183,8 +186,10 @@ def verify_user(username, password):
     if res.data:
         user_data = res.data[0]
         if user_data['password_hash'] == hash_password(password):
-            return True, user_data['role']
-    return False, None
+            # Split rights string into list
+            user_rights = user_data.get('rights', 'Home Dashboard').split(',')
+            return True, user_data['role'], user_rights
+    return False, None, None
 
 # --- FOOTER ---
 def render_footer():
@@ -280,11 +285,12 @@ def login_page():
         username = st.text_input("Username", key="login_user")
         password = st.text_input("Password", type="password", key="login_pass")
         if st.button("SIGN IN", key="login_button"):
-            success, role = verify_user(username, password)
+            success, role, rights = verify_user(username, password)
             if success:
                 st.session_state.logged_in = True
                 st.session_state.username = username
                 st.session_state.role = role
+                st.session_state.rights = rights
                 st.rerun()
             else: st.error("Invalid Username or Password.")
 
@@ -300,13 +306,21 @@ def page_header():
     st.markdown("---")
 
 def render_navigation_bar():
-    NAV_BAR_PAGES = {
+    ALL_PAGES = {
         "Home Dashboard": {"label": "HOME"}, "Enroll": {"label": "ENROLLMENT"},
         "Search": {"label": "SEARCH"}, "Billing": {"label": "BILLING"},
         "Expenses": {"label": "EXPENSES"}, "Reports": {"label": "REPORTS"},
         "Assets": {"label": "ASSETS"}, "Settings": {"label": "SETTINGS"},
     }
-    if st.session_state.role == ADMIN_ROLE: NAV_BAR_PAGES["Users"] = {"label": "USERS"}
+    
+    # Filter pages based on rights (Admins get all)
+    if st.session_state.role == ADMIN_ROLE:
+        NAV_BAR_PAGES = ALL_PAGES.copy()
+        NAV_BAR_PAGES["Users"] = {"label": "USERS"}
+    else:
+        user_rights = st.session_state.get('rights', ["Home Dashboard"])
+        NAV_BAR_PAGES = {k: v for k, v in ALL_PAGES.items() if k in user_rights}
+    
     num_items = len(NAV_BAR_PAGES) + 1
     cols = st.columns(num_items)
     st.markdown("""
@@ -956,10 +970,41 @@ elif st.session_state.current_page == "Users":
     render_navigation_bar()
     st.header("Users")
     if st.session_state.role == ADMIN_ROLE:
+        # RIGHTS MANAGEMENT UI
+        st.subheader("Manage User Rights")
+        users_df = get_data("users", "id, username, role, rights")
+        if not users_df.empty:
+            # Filter out current admin to avoid self-lockout
+            other_users = users_df[users_df['username'] != st.session_state.username]
+            if not other_users.empty:
+                user_to_mod = st.selectbox("Select User to Assign Rights", other_users['username'].tolist())
+                selected_user_row = other_users[other_users['username'] == user_to_mod].iloc[0]
+                
+                # Get current rights or default to Home
+                current_rights = selected_user_row['rights'].split(',') if selected_user_row['rights'] else ["Home Dashboard"]
+                
+                new_rights = st.multiselect(
+                    "Assign Menu Access (Rights)", 
+                    options=ALL_MENU_KEYS, 
+                    default=[r for r in current_rights if r in ALL_MENU_KEYS]
+                )
+                
+                if st.button("Update User Rights"):
+                    rights_str = ",".join(new_rights) if new_rights else "Home Dashboard"
+                    run_supabase_update("users", {"rights": rights_str}, selected_user_row['id'])
+                    st.success(f"Rights updated for {user_to_mod}!")
+                    st.rerun()
+            else:
+                st.info("No other users found to manage.")
+
+        st.divider()
+        st.subheader("Create New User")
         with st.form("u_f"):
             un = st.text_input("User"); up = st.text_input("Pass", type="password")
             if st.form_submit_button("Create"):
-                run_supabase_insert("users", {"username": un, "password_hash": hash_password(up), "role": "user"})
-        st.dataframe(get_data("users", "id, username, role"), use_container_width=True)
+                # New users get Home Dashboard by default
+                run_supabase_insert("users", {"username": un, "password_hash": hash_password(up), "role": "user", "rights": "Home Dashboard"})
+                st.rerun()
+        st.dataframe(get_data("users", "id, username, role, rights"), use_container_width=True)
 
 render_footer()
