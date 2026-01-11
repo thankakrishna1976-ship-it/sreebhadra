@@ -170,15 +170,20 @@ def generate_financial_pdf(income_df, expense_df, title, t_inc, t_exp, t_net):
     
     story.append(Paragraph("Income Details", styles['h4']))
     if not income_df.empty:
-        inc_data = [income_df.columns.tolist()] + income_df.values.tolist()
-        t_inc = Table(inc_data, hAlign='LEFT', repeatRows=1)
-        t_inc.setStyle(TableStyle([
+        # Prepare clean PDF dataframe
+        inc_pdf_df = income_df.copy()
+        if 'Date' in inc_pdf_df.columns:
+            inc_pdf_df['Date'] = inc_pdf_df['Date'].astype(str)
+            
+        inc_data = [inc_pdf_df.columns.tolist()] + inc_pdf_df.values.tolist()
+        t_inc_table = Table(inc_data, hAlign='LEFT', repeatRows=1)
+        t_inc_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#800000')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.gold),
             ('FONTSIZE', (0, 0), (-1, -1), 8),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
         ]))
-        story.append(t_inc)
+        story.append(t_inc_table)
     else:
         story.append(Paragraph("No income records for this period.", styles['Normal']))
         
@@ -186,15 +191,19 @@ def generate_financial_pdf(income_df, expense_df, title, t_inc, t_exp, t_net):
 
     story.append(Paragraph("Expense Details", styles['h4']))
     if not expense_df.empty:
-        exp_data = [expense_df.columns.tolist()] + expense_df.values.tolist()
-        t_exp = Table(exp_data, hAlign='LEFT', repeatRows=1)
-        t_exp.setStyle(TableStyle([
+        exp_pdf_df = expense_df.copy()
+        if 'Date' in exp_pdf_df.columns:
+            exp_pdf_df['Date'] = exp_pdf_df['Date'].astype(str)
+            
+        exp_data = [exp_pdf_df.columns.tolist()] + exp_pdf_df.values.tolist()
+        t_exp_table = Table(exp_data, hAlign='LEFT', repeatRows=1)
+        t_exp_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#800000')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.gold),
             ('FONTSIZE', (0, 0), (-1, -1), 8),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
         ]))
-        story.append(t_exp)
+        story.append(t_exp_table)
     else:
         story.append(Paragraph("No expense records for this period.", styles['Normal']))
 
@@ -752,10 +761,18 @@ elif st.session_state.current_page == "Reports":
         c_m, c_y = st.columns(2); sel_month = c_m.selectbox("Month", list(calendar.month_name)[1:], index=today.month-1); sel_year = c_y.number_input("Year", min_value=2020, value=today.year)
         month_idx = list(calendar.month_name).index(sel_month); start_d = date(sel_year, month_idx, 1); end_d = date(sel_year, month_idx, calendar.monthrange(sel_year, month_idx)[1])
     else: cs1, cs2 = st.columns(2); start_d = cs1.date_input("Start Date", value=today-timedelta(30)); end_d = cs2.date_input("End Date", value=today)
+    
     df_trans = get_data("transactions"); df_exp = get_data("users_expenses"); df_serv = get_data("services")
-    if not df_trans.empty: df_trans['dt'] = pd.to_datetime(df_trans['date']).dt.date; df_trans = df_trans[(df_trans['dt'] >= start_d) & (df_trans['dt'] <= end_d)]
-    if not df_exp.empty: df_exp['dt'] = pd.to_datetime(df_exp['payment_date']).dt.date; df_exp = df_exp[(df_exp['dt'] >= start_d) & (df_exp['dt'] <= end_d)]
-    t_inc = df_trans['amount'].sum() if not df_trans.empty else 0; t_exp = df_exp['amount'].sum() if not df_exp.empty else 0; t_net = t_inc - t_exp
+    if not df_trans.empty: 
+        df_trans['dt'] = pd.to_datetime(df_trans['date']).dt.date
+        df_trans = df_trans[(df_trans['dt'] >= start_d) & (df_trans['dt'] <= end_d)]
+    if not df_exp.empty: 
+        df_exp['dt'] = pd.to_datetime(df_exp['payment_date']).dt.date
+        df_exp = df_exp[(df_exp['dt'] >= start_d) & (df_exp['dt'] <= end_d)]
+        
+    t_inc = df_trans['amount'].sum() if not df_trans.empty else 0
+    t_exp = df_exp['amount'].sum() if not df_exp.empty else 0
+    t_net = t_inc - t_exp
     st.divider(); c1, c2, c3 = st.columns(3); c1.metric("Period Income", f"₹ {t_inc:,.2f}"); c2.metric("Period Expenses", f"₹ {t_exp:,.2f}"); c3.metric("Net Profit", f"₹ {t_net:,.2f}")
     
     st.subheader("Detailed Financial Ledger")
@@ -767,15 +784,20 @@ elif st.session_state.current_page == "Reports":
     
     if ledger_rows:
         ledger_df_raw = pd.DataFrame(ledger_rows).sort_values("Date")
-        ledger_df_display = ledger_df_raw.copy(); ledger_df_display['Date'] = ledger_df_display['Date'].apply(format_date_for_ui); ledger_df_display.insert(0, 'Sl.No', range(1, len(ledger_df_display) + 1))
+        ledger_df_display = ledger_df_raw.copy()
+        ledger_df_display['Date'] = ledger_df_display['Date'].apply(format_date_for_ui)
+        ledger_df_display.insert(0, 'Sl.No', range(1, len(ledger_df_display) + 1))
         st.dataframe(ledger_df_display.drop(columns=['id', 'source']), use_container_width=True, hide_index=True)
         
         st.divider(); st.markdown("### 📥 Download Reports")
         d_col1, d_col2 = st.columns(2)
         with d_col1:
-            title_str = f"Ledger: {start_d.strftime('%d/%m/%Y')} - {end_d.strftime('%d/%m/%Y')}"; st.download_button("📂 Download PDF Report", generate_financial_pdf(df_trans, df_exp, title_str, t_inc, t_exp, t_net), f"Ledger_{start_d}.pdf", "application/pdf")
+            title_str = f"Ledger: {start_d.strftime('%d/%m/%Y')} - {end_d.strftime('%d/%m/%Y')}"
+            st.download_button("📂 Download PDF Report", generate_financial_pdf(df_trans, df_exp, title_str, t_inc, t_exp, t_net), f"Ledger_{start_d}.pdf", "application/pdf")
         with d_col2:
-            out = io.BytesIO(); with pd.ExcelWriter(out, engine='xlsxwriter') as wr: ledger_df_display.drop(columns=['id', 'source']).to_excel(wr, index=False, sheet_name='Ledger')
+            out = io.BytesIO()
+            with pd.ExcelWriter(out, engine='xlsxwriter') as wr: 
+                ledger_df_display.drop(columns=['id', 'source']).to_excel(wr, index=False, sheet_name='Ledger')
             st.download_button("📊 Download Excel Ledger", out.getvalue(), f"Ledger_{start_d}.xlsx")
             
         if st.session_state.role == ADMIN_ROLE:
@@ -783,7 +805,8 @@ elif st.session_state.current_page == "Reports":
             ledger_df_display['Selection'] = ledger_df_display.apply(lambda r: f"Sl:{r['Sl.No']} | {r['Date']} | {r['Description']} (₹{r['Income'] if r['Income']>0 else r['Expenses']})", axis=1)
             item_to_del = st.selectbox("Select Ledger Entry to Delete", ledger_df_display['Selection'].tolist())
             if st.button("Delete Selected Ledger Entry"):
-                row_info = ledger_df_raw.iloc[int(item_to_del.split('|')[0].replace('Sl:', '')) - 1]
+                sl_val = int(item_to_del.split('|')[0].replace('Sl:', '').strip())
+                row_info = ledger_df_raw.iloc[sl_val - 1]
                 run_supabase_delete(row_info['source'], row_info['id'])
                 st.success("Record deleted!"); st.rerun()
     else: st.info("No records for this period.")
