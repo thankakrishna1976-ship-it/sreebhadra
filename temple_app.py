@@ -394,6 +394,7 @@ def render_news_ticker():
     ticker_items = []
     df_fam = get_data("families")
     if not df_fam.empty:
+        # Check dob exists and is not None before filtering
         b_df = df_fam[df_fam['dob'].astype(str).str.contains(today_md, na=False)]
         for _, r in b_df.iterrows(): ticker_items.append(f"🎂 Happy Birthday to Devotee Head: {r['head_name']}!")
         p_df = df_fam[df_fam['yearly_pooja_date'].astype(str).str.contains(today_md, na=False)]
@@ -588,11 +589,8 @@ elif st.session_state.current_page == "Enroll":
             except Exception as e: st.error(f"Failed: {e}")
 
 elif st.session_state.current_page == "Search":
-    page_header()
-    render_navigation_bar()
-    st.header("Search & Manage Devotees")
-    fams = get_data("families")
-    mems = get_data("members")
+    page_header(); render_navigation_bar(); st.header("Search & Manage Devotees")
+    fams = get_data("families"); mems = get_data("members")
     if fams.empty:
         st.info("No devotees enrolled yet.")
     else:
@@ -612,71 +610,40 @@ elif st.session_state.current_page == "Search":
             st.warning("No records found.")
         else:
             display_df = full_df.copy()
-            display_df['DOB'] = display_df['DOB'].apply(format_date_for_ui)
-            display_df['Wedding Day'] = display_df['Wedding Day'].apply(format_date_for_ui)
-            display_df['Yearly Pooja'] = display_df['Yearly Pooja'].apply(format_date_for_ui)
-            display_df = display_df.reset_index(drop=True)
-            display_df.insert(0, 'Sl.No', display_df.index + 1)
+            display_df['DOB'] = display_df['DOB'].apply(format_date_for_ui); display_df['Wedding Day'] = display_df['Wedding Day'].apply(format_date_for_ui); display_df['Yearly Pooja'] = display_df['Yearly Pooja'].apply(format_date_for_ui)
+            display_df = display_df.reset_index(drop=True); display_df.insert(0, 'Sl.No', display_df.index + 1)
             final_cols = ['Sl.No', 'Family Head Name', 'Address', 'Mobile No', 'WhatsApp No', 'Family Member Name', 'Relationship', 'DOB', 'Natchathiram', 'Wedding Day', 'Yearly Pooja']
             st.dataframe(display_df[final_cols], hide_index=True, use_container_width=True)
-            st.divider()
-            st.subheader("⚙️ Account Management")
+            st.divider(); st.subheader("⚙️ Account Management")
             m_tab1, m_tab2, m_tab3 = st.tabs(["Edit Profiles", "Delete Profiles", "Account View"])
             with m_tab1:
                 edit_type = st.radio("What would you like to edit?", ["Family Head", "Family Member"], horizontal=True)
                 if edit_type == "Family Head":
-                    u_heads = full_df.drop_duplicates('fid')
-                    h_dict = {f"{r['Family Head Name']} (ID: {r['fid']})": r['fid'] for _, r in u_heads.iterrows()}
-                    h_sel = st.selectbox("Select Head to Edit", list(h_dict.keys()))
-                    curr_head = fams[fams['id'] == h_dict[h_sel]].iloc[0]
+                    u_heads = full_df.drop_duplicates('fid'); h_dict = {f"{r['Family Head Name']} (ID: {r['fid']})": r['fid'] for _, r in u_heads.iterrows()}; h_sel = st.selectbox("Select Head to Edit", list(h_dict.keys())); curr_head = fams[fams['id'] == h_dict[h_sel]].iloc[0]
                     with st.form("edit_head_form"):
-                        e_h_name = st.text_input("Name", value=curr_head['head_name'])
-                        e_h_phone = st.text_input("Phone", value=curr_head['phone'])
-                        e_h_wa = st.text_input("WhatsApp", value=curr_head['whatsapp'])
-                        e_h_addr = st.text_area("Address", value=curr_head['address'])
-                        e_h_star = st.selectbox("Star", NATCHATHIRAM_OPTIONS, index=NATCHATHIRAM_OPTIONS.index(curr_head['natchathiram']) if curr_head['natchathiram'] in NATCHATHIRAM_OPTIONS else 0)
-                        e_h_dob = st.date_input("DOB", value=safe_date_convert(curr_head['dob']), min_value=MIN_DATE)
-                        e_h_wed = st.date_input("Wedding Day", value=safe_date_convert(curr_head['wedding_date']), min_value=MIN_DATE)
-                        e_h_pj = st.date_input("Yearly Pooja", value=safe_date_convert(curr_head['yearly_pooja_date']))
+                        e_h_name = st.text_input("Name", value=curr_head['head_name']); e_h_phone = st.text_input("Phone", value=curr_head['phone']); e_h_wa = st.text_input("WhatsApp", value=curr_head['whatsapp']); e_h_addr = st.text_area("Address", value=curr_head['address']); e_h_star = st.selectbox("Star", NATCHATHIRAM_OPTIONS, index=NATCHATHIRAM_OPTIONS.index(curr_head['natchathiram']) if curr_head['natchathiram'] in NATCHATHIRAM_OPTIONS else 0); e_h_dob = st.date_input("DOB", value=safe_date_convert(curr_head['dob']), min_value=MIN_DATE); e_h_wed = st.date_input("Wedding Day", value=safe_date_convert(curr_head['wedding_date']), min_value=MIN_DATE); e_h_pj = st.date_input("Yearly Pooja", value=safe_date_convert(curr_head['yearly_pooja_date']))
                         if st.form_submit_button("Update Head Profile"):
-                            up_data = {"head_name": e_h_name, "phone": e_h_phone, "whatsapp": e_h_wa, "address": e_h_addr, "natchathiram": e_h_star, "dob": format_date_for_db(e_h_dob), "wedding_date": format_date_for_db(e_h_wed), "yearly_pooja_date": format_date_for_db(e_h_pj)}
-                            run_supabase_update("families", up_data, curr_head['id'])
-                            st.success("Head Profile Updated!"); st.rerun()
+                            run_supabase_update("families", {"head_name": e_h_name, "phone": e_h_phone, "whatsapp": e_h_wa, "address": e_h_addr, "natchathiram": e_h_star, "dob": format_date_for_db(e_h_dob), "wedding_date": format_date_for_db(e_h_wed), "yearly_pooja_date": format_date_for_db(e_h_pj)}, curr_head['id']); st.success("Head Profile Updated!"); st.rerun()
                 else:
                     if not mems.empty:
-                        m_dict = {f"{r['Family Member Name']} ({r['Relationship']}) - Head: {r['Family Head Name']}": r['pid'] for _, r in full_df[full_df['ish'] == False].iterrows()}
-                        m_sel = st.selectbox("Select Member to Edit", list(m_dict.keys()))
-                        curr_mem = mems[mems['id'] == m_dict[m_sel]].iloc[0]
+                        m_dict = {f"{r['Family Member Name']} ({r['Relationship']}) - Head: {r['Family Head Name']}": r['pid'] for _, r in full_df[full_df['ish'] == False].iterrows()}; m_sel = st.selectbox("Select Member to Edit", list(m_dict.keys())); curr_mem = mems[mems['id'] == m_dict[m_sel]].iloc[0]
                         with st.form("edit_mem_form"):
-                            e_m_name = st.text_input("Name", value=curr_mem['member_name'])
-                            e_m_rel = st.selectbox("Relationship", RELATIONSHIP_OPTIONS, index=RELATIONSHIP_OPTIONS.index(curr_mem['relationship']) if curr_mem['relationship'] in RELATIONSHIP_OPTIONS else 0)
-                            e_m_phone = st.text_input("Phone", value=curr_mem['phone'] if curr_mem['phone'] else "")
-                            e_m_wa = st.text_input("WhatsApp", value=curr_mem['whatsapp'] if curr_mem['whatsapp'] else "")
-                            e_m_star = st.selectbox("Star", NATCHATHIRAM_OPTIONS, index=NATCHATHIRAM_OPTIONS.index(curr_mem['natchathiram']) if curr_mem['natchathiram'] in NATCHATHIRAM_OPTIONS else 0)
-                            e_m_dob = st.date_input("DOB", value=safe_date_convert(curr_mem['dob']), min_value=MIN_DATE)
-                            e_m_wed = st.date_input("Wedding Day", value=safe_date_convert(curr_mem['wedding_date']), min_value=MIN_DATE)
-                            e_m_pj = st.date_input("Yearly Pooja", value=safe_date_convert(curr_mem['yearly_pooja_date']))
+                            e_m_name = st.text_input("Name", value=curr_mem['member_name']); e_m_rel = st.selectbox("Relationship", RELATIONSHIP_OPTIONS, index=RELATIONSHIP_OPTIONS.index(curr_mem['relationship']) if curr_mem['relationship'] in RELATIONSHIP_OPTIONS else 0); e_m_phone = st.text_input("Phone", value=curr_mem['phone'] if curr_mem['phone'] else ""); e_m_wa = st.text_input("WhatsApp", value=curr_mem['whatsapp'] if curr_mem['whatsapp'] else ""); e_m_star = st.selectbox("Star", NATCHATHIRAM_OPTIONS, index=NATCHATHIRAM_OPTIONS.index(curr_mem['natchathiram']) if curr_mem['natchathiram'] in NATCHATHIRAM_OPTIONS else 0); e_m_dob = st.date_input("DOB", value=safe_date_convert(curr_mem['dob']), min_value=MIN_DATE); e_m_wed = st.date_input("Wedding Day", value=safe_date_convert(curr_mem['wedding_date']), min_value=MIN_DATE); e_m_pj = st.date_input("Yearly Pooja", value=safe_date_convert(curr_mem['yearly_pooja_date']))
                             if st.form_submit_button("Update Member Profile"):
-                                up_m_data = {"member_name": e_m_name, "relationship": e_m_rel, "phone": e_m_phone, "whatsapp": e_m_wa, "natchathiram": e_m_star, "dob": format_date_for_db(e_m_dob), "wedding_date": format_date_for_db(e_m_wed), "yearly_pooja_date": format_date_for_db(e_m_pj)}
-                                run_supabase_update("members", up_m_data, curr_mem['id'])
-                                st.success("Member Profile Updated!"); st.rerun()
+                                run_supabase_update("members", {"member_name": e_m_name, "relationship": e_m_rel, "phone": e_m_phone, "whatsapp": e_m_wa, "natchathiram": e_m_star, "dob": format_date_for_db(e_m_dob), "wedding_date": format_date_for_db(e_m_wed), "yearly_pooja_date": format_date_for_db(e_m_pj)}, curr_mem['id']); st.success("Member Profile Updated!"); st.rerun()
                     else: st.info("No members to edit.")
             with m_tab2:
                 del_col1, del_col2 = st.columns(2)
                 with del_col1:
                     del_m_list = full_df[full_df['ish'] == False]
                     if not del_m_list.empty:
-                        d_m_dict = {f"{r['Family Member Name']} ({r['Relationship']})": r['pid'] for _, r in del_m_list.iterrows()}
-                        d_m_sel = st.selectbox("Member to Delete", list(d_m_dict.keys()))
+                        d_m_dict = {f"{r['Family Member Name']} ({r['Relationship']})": r['pid'] for _, r in del_m_list.iterrows()}; d_m_sel = st.selectbox("Member to Delete", list(d_m_dict.keys()))
                         if st.button("Delete Member"): run_supabase_delete("members", d_m_dict[d_m_sel]); st.rerun()
                 with del_col2:
-                    d_f_dict = {f"{r['Family Head Name']} (ID: {r['fid']})": r['fid'] for _, r in full_df.drop_duplicates('fid').iterrows()}
-                    d_f_sel = st.selectbox("Family to Delete", list(d_f_dict.keys()))
+                    d_f_dict = {f"{r['Family Head Name']} (ID: {r['fid']})": r['fid'] for _, r in full_df.drop_duplicates('fid').iterrows()}; d_f_sel = st.selectbox("Family to Delete", list(d_f_dict.keys()))
                     if st.button("Delete Entire Family"): supabase.table("members").delete().eq("family_id", d_f_dict[d_f_sel]).execute(); run_supabase_delete("families", d_f_dict[d_f_sel]); st.rerun()
             with m_tab3:
-                v_heads = full_df.drop_duplicates('fid'); v_f_dict = {f"{r['Family Head Name']}": r['fid'] for _, r in v_heads.iterrows()}
-                v_sel = st.selectbox("Select Family to View", list(v_f_dict.keys()))
-                v_row = fams[fams['id'] == v_f_dict[v_sel]].iloc[0]
+                v_heads = full_df.drop_duplicates('fid'); v_f_dict = {f"{r['Family Head Name']}": r['fid'] for _, r in v_heads.iterrows()}; v_sel = st.selectbox("Select Family to View", list(v_f_dict.keys())); v_row = fams[fams['id'] == v_f_dict[v_sel]].iloc[0]
                 v_c1, v_c2 = st.columns([1, 3])
                 with v_c1:
                     img = base64_to_image(v_row['photo'])
@@ -696,15 +663,11 @@ elif st.session_state.current_page == "Billing":
                 f_data = get_data("families"); m_data = get_data("members")
                 if not f_data.empty:
                     opts = {}
-                    for _, f in f_data.iterrows():
-                        key = f"{f['head_name']} (Head)"
-                        opts[key] = {"id": f['id'], "name": f['head_name'], "address": f['address'], "wa": f['whatsapp'] if f['whatsapp'] else f['phone']}
+                    for _, f in f_data.iterrows(): opts[f"{f['head_name']} (Head)"] = {"id": f['id'], "name": f['head_name'], "address": f['address'], "wa": f['whatsapp'] if f['whatsapp'] else f['phone']}
                     for _, m in m_data.iterrows():
-                        key = f"{m['member_name']} ({m['relationship']})"
                         h_addr = f_data[f_data['id'] == m['family_id']]['address'].values[0] if not f_data[f_data['id'] == m['family_id']].empty else "N/A"
-                        opts[key] = {"id": m['family_id'], "name": m['member_name'], "address": h_addr, "wa": m['whatsapp'] if m['whatsapp'] else (m['phone'] if m['phone'] else opts.get(f"{f_data[f_data['id'] == m['family_id']]['head_name'].values[0]} (Head)", {}).get("wa", ""))}
-                    sel_k = st.selectbox("Select Devotee", list(opts.keys()))
-                    d_obj = opts[sel_k]; selected_name, selected_id, selected_address, selected_wa = d_obj['name'], d_obj['id'], d_obj['address'], d_obj['wa']
+                        opts[f"{m['member_name']} ({m['relationship']})"] = {"id": m['family_id'], "name": m['member_name'], "address": h_addr, "wa": m['whatsapp'] if m['whatsapp'] else (m['phone'] if m['phone'] else opts.get(f"{f_data[f_data['id'] == m['family_id']]['head_name'].values[0]} (Head)", {}).get("wa", ""))}
+                    sel_k = st.selectbox("Select Devotee", list(opts.keys())); d_obj = opts[sel_k]; selected_name, selected_id, selected_address, selected_wa = d_obj['name'], d_obj['id'], d_obj['address'], d_obj['wa']
                 else: st.warning("Enroll devotees first.")
             else: selected_name = st.text_input("Guest Name *"); selected_address = st.text_area("Guest Address"); selected_wa = st.text_input("Guest WhatsApp No.")
             servs = get_data("services")
@@ -772,8 +735,7 @@ elif st.session_state.current_page == "Expenses":
             try:
                 l_df = pd.read_excel(ledger_file, engine='openpyxl')
                 for _, row in l_df.iterrows():
-                    dt = format_date_for_db(row['Date'])
-                    desc = str(row['Description']); inc = float(row['Income'] or 0); exp = float(row['Expenses'] or 0); t = str(row['Type'])
+                    dt = format_date_for_db(row['Date']); desc = str(row['Description']); inc = float(row['Income'] or 0); exp = float(row['Expenses'] or 0); t = str(row['Type'])
                     if inc > 0: run_supabase_insert("transactions", {"amount": inc, "date": f"{dt} 00:00:00", "guest_name": desc, "guest_whatsapp": "Uploaded", "family_id": 0})
                     if exp > 0: run_supabase_insert("users_expenses", {"expense_name": desc, "expense_type": t, "amount": exp, "payment_date": dt, "status": "Paid"})
                 st.success("Ledger processed successfully!"); st.rerun()
@@ -799,24 +761,31 @@ elif st.session_state.current_page == "Reports":
     st.subheader("Detailed Financial Ledger")
     ledger_rows = []
     if not df_trans.empty:
-        for _, r in df_trans.iterrows(): ledger_rows.append({"Date": r['dt'], "Description": r['guest_name'] or "Service Income", "Income": r['amount'], "Expenses": 0, "Type": "Income"})
+        for _, r in df_trans.iterrows(): ledger_rows.append({"id": r['id'], "source": "transactions", "Date": r['dt'], "Description": r['guest_name'] or "Service Income", "Income": r['amount'], "Expenses": 0, "Type": "Income"})
     if not df_exp.empty:
-        for _, r in df_exp.iterrows(): ledger_rows.append({"Date": r['dt'], "Description": r['expense_name'], "Income": 0, "Expenses": r['amount'], "Type": r['expense_type']})
+        for _, r in df_exp.iterrows(): ledger_rows.append({"id": r['id'], "source": "users_expenses", "Date": r['dt'], "Description": r['expense_name'], "Income": 0, "Expenses": r['amount'], "Type": r['expense_type']})
     
     if ledger_rows:
-        ledger_df = pd.DataFrame(ledger_rows).sort_values("Date")
-        ledger_df['Date'] = ledger_df['Date'].apply(format_date_for_ui)
-        ledger_df.insert(0, 'Sl.No', range(1, len(ledger_df) + 1))
-        st.dataframe(ledger_df, use_container_width=True, hide_index=True)
+        ledger_df_raw = pd.DataFrame(ledger_rows).sort_values("Date")
+        ledger_df_display = ledger_df_raw.copy(); ledger_df_display['Date'] = ledger_df_display['Date'].apply(format_date_for_ui); ledger_df_display.insert(0, 'Sl.No', range(1, len(ledger_df_display) + 1))
+        st.dataframe(ledger_df_display.drop(columns=['id', 'source']), use_container_width=True, hide_index=True)
+        
         st.divider(); st.markdown("### 📥 Download Reports")
         d_col1, d_col2 = st.columns(2)
         with d_col1:
-            title_str = f"Ledger: {start_d.strftime('%d/%m/%Y')} - {end_d.strftime('%d/%m/%Y')}"
-            st.download_button("📂 Download PDF Report", generate_financial_pdf(df_trans, df_exp, title_str, t_inc, t_exp, t_net), f"Ledger_{start_d}.pdf", "application/pdf")
+            title_str = f"Ledger: {start_d.strftime('%d/%m/%Y')} - {end_d.strftime('%d/%m/%Y')}"; st.download_button("📂 Download PDF Report", generate_financial_pdf(df_trans, df_exp, title_str, t_inc, t_exp, t_net), f"Ledger_{start_d}.pdf", "application/pdf")
         with d_col2:
-            out = io.BytesIO()
-            with pd.ExcelWriter(out, engine='xlsxwriter') as wr: ledger_df.to_excel(wr, index=False, sheet_name='Ledger')
+            out = io.BytesIO(); with pd.ExcelWriter(out, engine='xlsxwriter') as wr: ledger_df_display.drop(columns=['id', 'source']).to_excel(wr, index=False, sheet_name='Ledger')
             st.download_button("📊 Download Excel Ledger", out.getvalue(), f"Ledger_{start_d}.xlsx")
+            
+        if st.session_state.role == ADMIN_ROLE:
+            st.divider(); st.subheader("🗑️ Admin: Manage Ledger Records")
+            ledger_df_display['Selection'] = ledger_df_display.apply(lambda r: f"Sl:{r['Sl.No']} | {r['Date']} | {r['Description']} (₹{r['Income'] if r['Income']>0 else r['Expenses']})", axis=1)
+            item_to_del = st.selectbox("Select Ledger Entry to Delete", ledger_df_display['Selection'].tolist())
+            if st.button("Delete Selected Ledger Entry"):
+                row_info = ledger_df_raw.iloc[int(item_to_del.split('|')[0].replace('Sl:', '')) - 1]
+                run_supabase_delete(row_info['source'], row_info['id'])
+                st.success("Record deleted!"); st.rerun()
     else: st.info("No records for this period.")
 
 elif st.session_state.current_page == "Assets":
@@ -833,8 +802,7 @@ elif st.session_state.current_page == "Settings":
         with st.form("add_svc"):
             sn = st.text_input("Service Name"); sp = st.number_input("Price", min_value=0.0)
             if st.form_submit_button("Add Service"): run_supabase_insert("services", {"service_name": sn, "price": sp}); st.rerun()
-        st.write("Current Services:")
-        serv_list = get_data("services")
+        st.write("Current Services:"); serv_list = get_data("services")
         if not serv_list.empty:
             for _, sr in serv_list.iterrows():
                 sc1, sc2 = st.columns([4, 1]); sc1.write(f"{sr['service_name']} - ₹{sr['price']}")
@@ -844,8 +812,7 @@ elif st.session_state.current_page == "Settings":
             new_cat = st.text_input("New Expense Category Name")
             if st.form_submit_button("Add Expense Type"):
                 if new_cat: run_supabase_insert("expense_categories", {"category_name": new_cat}); st.rerun()
-        st.write("Current Expense Categories:")
-        cat_list = get_data("expense_categories")
+        st.write("Current Expense Categories:"); cat_list = get_data("expense_categories")
         if not cat_list.empty:
             for _, ct in cat_list.iterrows():
                 ec1, ec2 = st.columns([4, 1]); ec1.write(ct['category_name'])
@@ -858,13 +825,8 @@ elif st.session_state.current_page == "Users":
         if not users_df.empty:
             other_users = users_df[users_df['username'] != st.session_state.username]
             if not other_users.empty:
-                user_to_mod = st.selectbox("Select User", other_users['username'].tolist())
-                sel_user = other_users[other_users['username'] == user_to_mod].iloc[0]
-                cur_rights = sel_user['rights'].split(',') if sel_user['rights'] else ["Home Dashboard"]
-                new_rights = st.multiselect("Assign Rights", options=ALL_MENU_KEYS, default=[r for r in cur_rights if r in ALL_MENU_KEYS])
-                if st.button("Update User Rights"):
-                    run_supabase_update("users", {"rights": ",".join(new_rights) if new_rights else "Home Dashboard"}, sel_user['id'])
-                    st.success(f"Updated!"); st.rerun()
+                user_to_mod = st.selectbox("Select User", other_users['username'].tolist()); sel_user = other_users[other_users['username'] == user_to_mod].iloc[0]; cur_rights = sel_user['rights'].split(',') if sel_user['rights'] else ["Home Dashboard"]; new_rights = st.multiselect("Assign Rights", options=ALL_MENU_KEYS, default=[r for r in cur_rights if r in ALL_MENU_KEYS])
+                if st.button("Update User Rights"): run_supabase_update("users", {"rights": ",".join(new_rights) if new_rights else "Home Dashboard"}, sel_user['id']); st.success("Updated!"); st.rerun()
         st.divider(); st.subheader("Create New User")
         with st.form("u_f"):
             un = st.text_input("User"); up = st.text_input("Pass", type="password")
