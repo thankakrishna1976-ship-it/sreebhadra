@@ -682,6 +682,10 @@ elif st.session_state.current_page == "Billing":
             if not servs.empty:
                 s_dict = {r['service_name']: r for _, r in servs.iterrows()}; sel_s = st.selectbox("Select Service", list(s_dict.keys())); srv = s_dict[sel_s]
                 man_no = st.text_input("Manual Bill No."); book_no = st.text_input("Bill Book No.")
+                
+                # --- BILL VALUE DISPLAY ---
+                st.markdown(f"<p style='font-size:14px; font-weight:bold; color:#800000;'>Bill Value: ₹ {srv['price']:,.2f}</p>", unsafe_allow_html=True)
+                
                 if st.button("Generate Receipt"):
                     if billing_mode == "Guest Devotee" and not selected_name: st.error("Enter Name.")
                     else:
