@@ -43,7 +43,7 @@ PAYMENT_STATUS = ['Paid', 'Pending', 'Partial']
 MIN_DATE = date(1940, 1, 1)
 MAX_DATE = date(2040, 12, 31)
 
-# Menu Keys for Rights Management - UPDATED TO INCLUDE SAMAYAVAKUPPU
+# Menu Keys for Rights Management
 ALL_MENU_KEYS = ["Home Dashboard", "Enroll", "Search", "Billing", "Expenses", "Reports", "Assets", "Samayavakuppu", "Settings"]
 
 # TEMPLE DETAILS
@@ -337,7 +337,6 @@ def page_header():
     st.markdown("---")
 
 def render_navigation_bar():
-    # UPDATED ALL_PAGES DICTIONARY
     ALL_PAGES = {
         "Home Dashboard": {"label": "HOME"}, "Enroll": {"label": "ENROLLMENT"},
         "Search": {"label": "SEARCH"}, "Billing": {"label": "BILLING"},
@@ -840,7 +839,9 @@ elif st.session_state.current_page == "Samayavakuppu":
             with col2:
                 b_bank = st.text_input("Bond Issuing Bank")
                 b_no = st.text_input("Bond No")
-                b_expiry = st.date_input("Bond Expired Date", value=None)
+                col_inner_d = st.columns(2)
+                b_issued = col_inner_d[0].date_input("Bond Issued Date", value=None)
+                b_expiry = col_inner_d[1].date_input("Bond Expired Date", value=None)
                 s_photo = st.file_uploader("Upload Student Photograph", type=['jpg', 'jpeg', 'png'])
                 if s_photo:
                     st.image(s_photo, width=150, caption="Preview")
@@ -855,6 +856,7 @@ elif st.session_state.current_page == "Samayavakuppu":
                         "address": s_address,
                         "bond_bank": b_bank,
                         "bond_no": b_no,
+                        "bond_issued_date": format_date_for_db(b_issued),
                         "bond_expiry": format_date_for_db(b_expiry),
                         "photo": image_to_base64(s_photo) if s_photo else None
                     }
@@ -889,7 +891,7 @@ elif st.session_state.current_page == "Samayavakuppu":
                     with st.container(border=True):
                         f_col1, f_col2 = st.columns([1, 3])
                         with f_col1:
-                            photo_data = base64_to_image(s_rec['photo'])
+                            photo_data = base64_to_image(s_rec.get('photo'))
                             if photo_data:
                                 st.image(photo_data, use_container_width=True)
                             else:
@@ -903,10 +905,20 @@ elif st.session_state.current_page == "Samayavakuppu":
                             st.write(f"**Address:** {s_rec['address']}")
                             
                             st.markdown("#### Bond Details")
-                            bc1, bc2 = st.columns(2)
-                            bc1.write(f"**Bank:** {s_rec['bond_bank']}")
-                            bc1.write(f"**Bond No:** {s_rec['bond_no']}")
-                            bc2.write(f"**Expiry Date:** {format_date_for_ui(s_rec['bond_expiry'])}")
+                            bc1, bc2, bc3 = st.columns(3)
+                            bc1.info(f"**Bank:** {s_rec['bond_bank']}")
+                            bc1.info(f"**Bond No:** {s_rec['bond_no']}")
+                            
+                            # Issued Date Display
+                            bc2.write(f"**Issued Date:** {format_date_for_ui(s_rec.get('bond_issued_date'))}")
+                            
+                            # Expiry Warning logic
+                            exp_date = safe_date_convert(s_rec['bond_expiry'])
+                            if exp_date and exp_date <= date.today() + timedelta(days=30):
+                                bc3.error(f"**EXPIRES:** {format_date_for_ui(s_rec['bond_expiry'])}")
+                                st.toast(f"Reminder: {s_rec['student_name']}'s bond is expiring soon!", icon="⚠️")
+                            else:
+                                bc3.success(f"**Expiry Date:** {format_date_for_ui(s_rec['bond_expiry'])}")
 
                     if st.session_state.role == ADMIN_ROLE:
                         if st.button("🗑️ Delete Record", key=f"del_stud_{s_id}"):
