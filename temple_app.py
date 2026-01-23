@@ -43,8 +43,8 @@ PAYMENT_STATUS = ['Paid', 'Pending', 'Partial']
 MIN_DATE = date(1940, 1, 1)
 MAX_DATE = date(2040, 12, 31)
 
-# Menu Keys for Rights Management
-ALL_MENU_KEYS = ["Home Dashboard", "Enroll", "Search", "Billing", "Expenses", "Reports", "Assets", "Settings"]
+# Menu Keys for Rights Management - UPDATED TO INCLUDE SAMAYAVAKUPPU
+ALL_MENU_KEYS = ["Home Dashboard", "Enroll", "Search", "Billing", "Expenses", "Reports", "Assets", "Samayavakuppu", "Settings"]
 
 # TEMPLE DETAILS
 TEMPLE_NAME_FULL = "Sree Bhadreshwari Amman Temple Management System"
@@ -170,7 +170,6 @@ def generate_financial_pdf(income_df, expense_df, title, t_inc, t_exp, t_net):
     
     story.append(Paragraph("Income Details", styles['h4']))
     if not income_df.empty:
-        # Prepare clean PDF dataframe
         inc_pdf_df = income_df.copy()
         if 'Date' in inc_pdf_df.columns:
             inc_pdf_df['Date'] = inc_pdf_df['Date'].astype(str)
@@ -224,103 +223,6 @@ def verify_user(username, password):
     return False, None, None
 
 # --- FOOTER ---
-elif st.session_state.current_page == "Samayavakuppu":
-    page_header()
-    render_navigation_bar()
-    st.header("Samayavakuppu Student Bond Management")
-    
-    tab_entry, tab_view = st.tabs(["🆕 Student Entry", "📋 View Records"])
-
-    with tab_entry:
-        st.subheader("Register New Student Bond")
-        with st.form("student_bond_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                s_name = st.text_input("Student Name *")
-                s_dob = st.date_input("Date of Birth", value=None, min_value=MIN_DATE)
-                s_father = st.text_input("Father's Name")
-                s_mobile = st.text_input("Mobile No")
-                s_address = st.text_area("Address")
-            
-            with col2:
-                b_bank = st.text_input("Bond Issuing Bank")
-                b_no = st.text_input("Bond No")
-                b_expiry = st.date_input("Bond Expired Date", value=None)
-                s_photo = st.file_uploader("Upload Student Photograph", type=['jpg', 'jpeg', 'png'])
-                if s_photo:
-                    st.image(s_photo, width=150, caption="Preview")
-
-            if st.form_submit_button("Save Student Record"):
-                if s_name and b_no:
-                    student_data = {
-                        "student_name": s_name,
-                        "dob": format_date_for_db(s_dob),
-                        "father_name": s_father,
-                        "mobile_no": s_mobile,
-                        "address": s_address,
-                        "bond_bank": b_bank,
-                        "bond_no": b_no,
-                        "bond_expiry": format_date_for_db(b_expiry),
-                        "photo": image_to_base64(s_photo) if s_photo else None
-                    }
-                    res = run_supabase_insert("student_bonds", student_data)
-                    if res:
-                        st.success(f"Record for {s_name} saved successfully!")
-                else:
-                    st.error("Please fill in Student Name and Bond Number.")
-
-    with tab_view:
-        st.subheader("Search & View Student Bonds")
-        students_df = get_data("student_bonds")
-        
-        if not students_df.empty:
-            search_q = st.text_input("Search by Name or Bond No")
-            if search_q:
-                students_df = students_df[
-                    students_df['student_name'].str.contains(search_q, case=False, na=False) | 
-                    students_df['bond_no'].str.contains(search_q, case=False, na=False)
-                ]
-            
-            # Selection for Form View
-            student_list = {f"{r['student_name']} (Bond: {r['bond_no']})": r['id'] for _, r in students_df.iterrows()}
-            selected_student_label = st.selectbox("Select Student to View Full Form", [""] + list(student_list.keys()))
-            
-            if selected_student_label:
-                s_id = student_list[selected_student_label]
-                s_rec = students_df[students_df['id'] == s_id].iloc[0]
-                
-                # --- FORM FORMAT VIEW ---
-                st.markdown("---")
-                container = st.container(border=True)
-                with container:
-                    f_col1, f_col2 = st.columns([1, 3])
-                    with f_col1:
-                        img_data = base64_to_image(s_rec['photo'])
-                        if img_data:
-                            st.image(img_data, use_container_width=True)
-                        else:
-                            st.markdown("<div style='text-align:center; padding:20px; background:#eee;'>NO PHOTO</div>", unsafe_allow_html=True)
-                    
-                    with f_col2:
-                        st.markdown(f"### Student Bond Details: {s_rec['student_name']}")
-                        st.write(f"**Father's Name:** {s_rec['father_name']}")
-                        st.write(f"**Date of Birth:** {format_date_for_ui(s_rec['dob'])}")
-                        st.write(f"**Mobile:** {s_rec['mobile_no']}")
-                        st.write(f"**Address:** {s_rec['address']}")
-                        
-                        st.markdown("#### Bond Information")
-                        b_col1, b_col2 = st.columns(2)
-                        b_col1.info(f"**Bank:** {s_rec['bond_bank']}")
-                        b_col1.info(f"**Bond No:** {s_rec['bond_no']}")
-                        b_col2.warning(f"**Expiry Date:** {format_date_for_ui(s_rec['bond_expiry'])}")
-
-                # Admin Delete Option
-                if st.session_state.role == ADMIN_ROLE:
-                    if st.button("🗑️ Delete This Record", key=f"del_stud_{s_id}"):
-                        run_supabase_delete("student_bonds", s_id)
-                        st.rerun()
-        else:
-            st.info("No Samayavakuppu student records found.")
 def render_footer():
     st.markdown("""
         <style>
@@ -435,11 +337,13 @@ def page_header():
     st.markdown("---")
 
 def render_navigation_bar():
+    # UPDATED ALL_PAGES DICTIONARY
     ALL_PAGES = {
         "Home Dashboard": {"label": "HOME"}, "Enroll": {"label": "ENROLLMENT"},
         "Search": {"label": "SEARCH"}, "Billing": {"label": "BILLING"},
         "Expenses": {"label": "EXPENSES"}, "Reports": {"label": "REPORTS"},
-        "Assets": {"label": "ASSETS"}, "Settings": {"label": "SETTINGS"},
+        "Assets": {"label": "ASSETS"}, "Samayavakuppu": {"label": "SAMAYAVAKUPPU"},
+        "Settings": {"label": "SETTINGS"},
     }
     
     if st.session_state.role == ADMIN_ROLE:
@@ -500,7 +404,6 @@ def render_news_ticker():
     ticker_items = []
     df_fam = get_data("families")
     if not df_fam.empty:
-        # Check dob exists and is not None before filtering
         b_df = df_fam[df_fam['dob'].astype(str).str.contains(today_md, na=False)]
         for _, r in b_df.iterrows(): ticker_items.append(f"🎂 Happy Birthday to Devotee Head: {r['head_name']}!")
         p_df = df_fam[df_fam['yearly_pooja_date'].astype(str).str.contains(today_md, na=False)]
@@ -915,64 +818,13 @@ elif st.session_state.current_page == "Assets":
         if st.form_submit_button("Save"): run_supabase_insert("assets", {"asset_name": an, "value": av})
     st.dataframe(get_data("assets"), use_container_width=True)
 
-elif st.session_state.current_page == "Settings":
-    page_header(); render_navigation_bar(); st.header("Settings")
-    s_tab1, s_tab2 = st.tabs(["Service Settings", "Expense Type Settings"])
-    with s_tab1:
-        with st.form("add_svc"):
-            sn = st.text_input("Service Name"); sp = st.number_input("Price", min_value=0.0)
-            if st.form_submit_button("Add Service"): run_supabase_insert("services", {"service_name": sn, "price": sp}); st.rerun()
-        st.write("Current Services:"); serv_list = get_data("services")
-        if not serv_list.empty:
-            for _, sr in serv_list.iterrows():
-                sc1, sc2 = st.columns([4, 1]); sc1.write(f"{sr['service_name']} - ₹{sr['price']}")
-                if sc2.button("🗑️", key=f"del_svc_{sr['id']}"): run_supabase_delete("services", sr['id']); st.rerun()
-    with s_tab2:
-        with st.form("add_exp_type"):
-            new_cat = st.text_input("New Expense Category Name")
-            if st.form_submit_button("Add Expense Type"):
-                if new_cat: run_supabase_insert("expense_categories", {"category_name": new_cat}); st.rerun()
-        st.write("Current Expense Categories:"); cat_list = get_data("expense_categories")
-        if not cat_list.empty:
-            for _, ct in cat_list.iterrows():
-                ec1, ec2 = st.columns([4, 1]); ec1.write(ct['category_name'])
-                if ec2.button("🗑️", key=f"del_cat_{ct['id']}"): run_supabase_delete("expense_categories", ct['id']); st.rerun()
-
-elif st.session_state.current_page == "Users":
-    page_header()
-    render_navigation_bar()
-    st.header("Users")
-    if st.session_state.role == ADMIN_ROLE:
-        st.subheader("Manage User Rights")
-        users_df = get_data("users", "id, username, role, rights")
-        if not users_df.empty:
-            other_users = users_df[users_df['username'] != st.session_state.username]
-            if not other_users.empty:
-                user_to_mod = st.selectbox("Select User", other_users['username'].tolist())
-                sel_user = other_users[other_users['username'] == user_to_mod].iloc[0]
-                cur_rights = sel_user['rights'].split(',') if sel_user['rights'] else ["Home Dashboard"]
-                new_rights = st.multiselect("Assign Rights", options=ALL_MENU_KEYS, default=[r for r in cur_rights if r in ALL_MENU_KEYS])
-                if st.button("Update User Rights"):
-                    run_supabase_update("users", {"rights": ",".join(new_rights) if new_rights else "Home Dashboard"}, sel_user['id'])
-                    st.success("Updated!")
-                    st.rerun()
-        st.divider()
-        st.subheader("Create New User")
-        with st.form("u_f"):
-            un = st.text_input("User")
-            up = st.text_input("Pass", type="password")
-            if st.form_submit_button("Create"):
-                run_supabase_insert("users", {"username": un, "password_hash": hash_password(up), "role": "user", "rights": "Home Dashboard"})
-                st.rerun()
-        st.dataframe(get_data("users", "id, username, role, rights"), use_container_width=True)
-
-# --- NEW SAMAYAVAKUPPU MODULE ---
+# --- SAMAYAVAKUPPU MODULE ---
 elif st.session_state.current_page == "Samayavakuppu":
     page_header()
     render_navigation_bar()
     st.header("Samayavakuppu Student Bond Management")
     
-    tab_entry, tab_view = st.tabs(["🆕 Student Entry", "📋 View Records"])
+    tab_entry, tab_view = st.tabs(["📝 Student Entry", "📋 View Records"])
 
     with tab_entry:
         st.subheader("Register New Student Bond")
@@ -1007,10 +859,12 @@ elif st.session_state.current_page == "Samayavakuppu":
                         "photo": image_to_base64(s_photo) if s_photo else None
                     }
                     res = run_supabase_insert("student_bonds", student_data)
-                    if res:
+                    if res and res.data:
                         st.success(f"Record for {s_name} saved successfully!")
+                    else:
+                        st.error("Failed to save record. Check database connection.")
                 else:
-                    st.error("Please fill in Student Name and Bond Number.")
+                    st.error("Student Name and Bond Number are mandatory.")
 
     with tab_view:
         st.subheader("Search & View Student Bonds")
@@ -1019,55 +873,86 @@ elif st.session_state.current_page == "Samayavakuppu":
         if not students_df.empty:
             search_q = st.text_input("Search by Name or Bond No")
             if search_q:
-                students_df = students_df[
-                    students_df['student_name'].str.contains(search_q, case=False, na=False) | 
-                    students_df['bond_no'].str.contains(search_q, case=False, na=False)
-                ]
+                mask = (students_df['student_name'].str.contains(search_q, case=False, na=False) | 
+                        students_df['bond_no'].astype(str).str.contains(search_q, case=False, na=False))
+                students_df = students_df[mask]
             
             if not students_df.empty:
-                # Selection for Form View
-                student_list = {f"{r['student_name']} (Bond: {r['bond_no']})": r['id'] for _, r in students_df.iterrows()}
-                selected_student_label = st.selectbox("Select Student to View Full Form", [""] + list(student_list.keys()))
+                student_options = {f"{r['student_name']} (Bond: {r['bond_no']})": r['id'] for _, r in students_df.iterrows()}
+                selected_label = st.selectbox("Select Student to View Full Details", [""] + list(student_options.keys()))
                 
-                if selected_student_label:
-                    s_id = student_list[selected_student_label]
+                if selected_label:
+                    s_id = student_options[selected_label]
                     s_rec = students_df[students_df['id'] == s_id].iloc[0]
                     
-                    # --- FORM FORMAT VIEW ---
                     st.markdown("---")
                     with st.container(border=True):
                         f_col1, f_col2 = st.columns([1, 3])
                         with f_col1:
-                            img_data = base64_to_image(s_rec['photo'])
-                            if img_data:
-                                st.image(img_data, use_container_width=True)
+                            photo_data = base64_to_image(s_rec['photo'])
+                            if photo_data:
+                                st.image(photo_data, use_container_width=True)
                             else:
-                                st.markdown("<div style='text-align:center; padding:20px; background:#f0f0f0; color:#888;'>NO PHOTO</div>", unsafe_allow_html=True)
+                                st.markdown("<div style='height:150px; background:#f0f0f0; display:flex; align-items:center; justify-content:center; border:1px solid #ddd;'>👤 No Photo</div>", unsafe_allow_html=True)
                         
                         with f_col2:
-                            st.markdown(f"### Student Bond Details: {s_rec['student_name']}")
+                            st.markdown(f"### Student: {s_rec['student_name']}")
                             st.write(f"**Father's Name:** {s_rec['father_name']}")
-                            st.write(f"**Date of Birth:** {format_date_for_ui(s_rec['dob'])}")
-                            st.write(f"**Mobile:** {s_rec['mobile_no']}")
+                            st.write(f"**DOB:** {format_date_for_ui(s_rec['dob'])}")
+                            st.write(f"**Contact:** {s_rec['mobile_no']}")
                             st.write(f"**Address:** {s_rec['address']}")
                             
-                            st.markdown("#### Bond Information")
-                            b_col1, b_col2 = st.columns(2)
-                            b_col1.info(f"**Bank:** {s_rec['bond_bank']}")
-                            b_col1.info(f"**Bond No:** {s_rec['bond_no']}")
-                            b_col2.warning(f"**Expiry Date:** {format_date_for_ui(s_rec['bond_expiry'])}")
+                            st.markdown("#### Bond Details")
+                            bc1, bc2 = st.columns(2)
+                            bc1.write(f"**Bank:** {s_rec['bond_bank']}")
+                            bc1.write(f"**Bond No:** {s_rec['bond_no']}")
+                            bc2.write(f"**Expiry Date:** {format_date_for_ui(s_rec['bond_expiry'])}")
 
                     if st.session_state.role == ADMIN_ROLE:
-                        if st.button("🗑️ Delete This Record", key=f"del_stud_{s_id}"):
+                        if st.button("🗑️ Delete Record", key=f"del_stud_{s_id}"):
                             run_supabase_delete("student_bonds", s_id)
                             st.rerun()
             else:
-                st.warning("No students match your search.")
+                st.warning("No students found matching your search.")
         else:
             st.info("No Samayavakuppu student records found.")
 
+elif st.session_state.current_page == "Settings":
+    page_header(); render_navigation_bar(); st.header("Settings")
+    s_tab1, s_tab2 = st.tabs(["Service Settings", "Expense Type Settings"])
+    with s_tab1:
+        with st.form("add_svc"):
+            sn = st.text_input("Service Name"); sp = st.number_input("Price", min_value=0.0)
+            if st.form_submit_button("Add Service"): run_supabase_insert("services", {"service_name": sn, "price": sp}); st.rerun()
+        st.write("Current Services:"); serv_list = get_data("services")
+        if not serv_list.empty:
+            for _, sr in serv_list.iterrows():
+                sc1, sc2 = st.columns([4, 1]); sc1.write(f"{sr['service_name']} - ₹{sr['price']}")
+                if sc2.button("🗑️", key=f"del_svc_{sr['id']}"): run_supabase_delete("services", sr['id']); st.rerun()
+    with s_tab2:
+        with st.form("add_exp_type"):
+            new_cat = st.text_input("New Expense Category Name")
+            if st.form_submit_button("Add Expense Type"):
+                if new_cat: run_supabase_insert("expense_categories", {"category_name": new_cat}); st.rerun()
+        st.write("Current Expense Categories:"); cat_list = get_data("expense_categories")
+        if not cat_list.empty:
+            for _, ct in cat_list.iterrows():
+                ec1, ec2 = st.columns([4, 1]); ec1.write(ct['category_name'])
+                if ec2.button("🗑️", key=f"del_cat_{ct['id']}"): run_supabase_delete("expense_categories", ct['id']); st.rerun()
+
+elif st.session_state.current_page == "Users":
+    page_header(); render_navigation_bar(); st.header("Users")
+    if st.session_state.role == ADMIN_ROLE:
+        st.subheader("Manage User Rights"); users_df = get_data("users", "id, username, role, rights")
+        if not users_df.empty:
+            other_users = users_df[users_df['username'] != st.session_state.username]
+            if not other_users.empty:
+                user_to_mod = st.selectbox("Select User", other_users['username'].tolist()); sel_user = other_users[other_users['username'] == user_to_mod].iloc[0]; cur_rights = sel_user['rights'].split(',') if sel_user['rights'] else ["Home Dashboard"]; new_rights = st.multiselect("Assign Rights", options=ALL_MENU_KEYS, default=[r for r in cur_rights if r in ALL_MENU_KEYS])
+                if st.button("Update User Rights"): run_supabase_update("users", {"rights": ",".join(new_rights) if new_rights else "Home Dashboard"}, sel_user['id']); st.success("Updated!"); st.rerun()
+        st.divider(); st.subheader("Create New User")
+        with st.form("u_f"):
+            un = st.text_input("User"); up = st.text_input("Pass", type="password")
+            if st.form_submit_button("Create"): run_supabase_insert("users", {"username": un, "password_hash": hash_password(up), "role": "user", "rights": "Home Dashboard"}); st.rerun()
+        st.dataframe(get_data("users", "id, username, role, rights"), use_container_width=True)
+
 render_footer()
-
-
-
-
