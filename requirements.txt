@@ -1,6 +1,7 @@
 streamlit
 pandas
+supabase
 reportlab
 xlsxwriter
-supabase
 openpyxl
+
