@@ -791,7 +791,64 @@ elif st.session_state.current_page == "Reports":
         ledger_df_display['Date'] = ledger_df_display['Date'].apply(format_date_for_ui)
         ledger_df_display.insert(0, 'Sl.No', range(1, len(ledger_df_display) + 1))
         st.dataframe(ledger_df_display.drop(columns=['id', 'source']), use_container_width=True, hide_index=True)
+
+        # --- DESCRIPTION-WISE ANALYTICS ---
+        st.divider()
+        st.subheader("🔍 Description-Wise Analytics")
+        unique_descriptions = sorted(ledger_df_raw['Description'].unique().tolist())
+        selected_desc_filter = st.multiselect("Filter Report by Specific Description(s):", options=unique_descriptions)
         
+        if selected_desc_filter:
+            desc_filtered_df = ledger_df_raw[ledger_df_raw['Description'].isin(selected_desc_filter)].copy()
+            desc_inc = desc_filtered_df['Income'].sum()
+            desc_exp = desc_filtered_df['Expenses'].sum()
+            desc_net = desc_inc - desc_exp
+            
+            with st.container(border=True):
+                st.markdown(f"**Summary for Selected Descriptions:** {', '.join(selected_desc_filter)}")
+                df_c1, df_c2, df_c3 = st.columns(3)
+                df_c1.metric("Selected Income", f"₹ {desc_inc:,.2f}")
+                df_c2.metric("Selected Expenses", f"₹ {desc_exp:,.2f}")
+                df_c3.metric("Selected Net", f"₹ {desc_net:,.2f}", delta=desc_net)
+
+            desc_filtered_display = desc_filtered_df.copy()
+            desc_filtered_display['Date'] = desc_filtered_display['Date'].apply(format_date_for_ui)
+            st.dataframe(desc_filtered_display.drop(columns=['id', 'source']), use_container_width=True, hide_index=True)
+            
+            desc_out = io.BytesIO()
+            with pd.ExcelWriter(desc_out, engine='xlsxwriter') as dwr:
+                desc_filtered_display.drop(columns=['id', 'source']).to_excel(dwr, index=False, sheet_name='Filtered_Report')
+            st.download_button("📊 Download Filtered Excel", desc_out.getvalue(), f"Desc_Report_{start_d}.xlsx", key="desc_dl")
+
+        # --- CATEGORY-WISE SUMMARY ---
+        st.divider()
+        st.subheader("📊 Category-Wise Financial Summary")
+        cat_summary = ledger_df_raw.groupby('Type').agg({'Income': 'sum', 'Expenses': 'sum'}).reset_index()
+        cat_summary['Net Amount'] = cat_summary['Income'] - cat_summary['Expenses']
+        cat_summary = cat_summary.sort_values('Income', ascending=False)
+        
+        display_cat_summary = cat_summary.copy()
+        display_cat_summary['Income'] = display_cat_summary['Income'].apply(lambda x: f"₹ {x:,.2f}")
+        display_cat_summary['Expenses'] = display_cat_summary['Expenses'].apply(lambda x: f"₹ {x:,.2f}")
+        display_cat_summary['Net Amount'] = display_cat_summary['Net Amount'].apply(lambda x: f"₹ {x:,.2f}")
+        st.table(display_cat_summary)
+
+        # --- FINANCIAL VISUALIZATIONS ---
+        st.divider()
+        st.subheader("📈 Financial Visualizations")
+        chart_col1, chart_col2 = st.columns(2)
+        with chart_col1:
+            inc_data = ledger_df_raw[ledger_df_raw['Income'] > 0].groupby('Type')['Income'].sum()
+            if not inc_data.empty:
+                st.write("**Income by Category**")
+                st.bar_chart(inc_data, color="#800000")
+        with chart_col2:
+            exp_data = ledger_df_raw[ledger_df_raw['Expenses'] > 0].groupby('Type')['Expenses'].sum()
+            if not exp_data.empty:
+                st.write("**Expenses by Category**")
+                st.bar_chart(exp_data, color="#FFD700")
+
+        # --- DOWNLOAD MAIN REPORTS ---
         st.divider(); st.markdown("### 📥 Download Reports")
         d_col1, d_col2 = st.columns(2)
         with d_col1:
@@ -912,11 +969,8 @@ elif st.session_state.current_page == "Samayavakuppu":
                             bc1, bc2, bc3 = st.columns(3)
                             bc1.info(f"**Bank:** {s_rec['bond_bank']}")
                             bc1.info(f"**Bond No:** {s_rec['bond_no']}")
-                            
-                            # Issued Date Display
                             bc2.write(f"**Issued Date:** {format_date_for_ui(s_rec.get('bond_issued_date'))}")
                             
-                            # Expiry Warning logic
                             exp_date = safe_date_convert(s_rec['bond_expiry'])
                             if exp_date and exp_date <= date.today() + timedelta(days=30):
                                 bc3.error(f"**EXPIRES:** {format_date_for_ui(s_rec['bond_expiry'])}")
@@ -972,4 +1026,3 @@ elif st.session_state.current_page == "Users":
         st.dataframe(get_data("users", "id, username, role, rights"), use_container_width=True)
 
 render_footer()
-
