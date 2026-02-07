@@ -754,70 +754,72 @@ elif st.session_state.current_page == "Expenses":
             except Exception as e: st.error(f"Error: {e}")
 
 elif st.session_state.current_page == "Reports":
-    page_header()
-    render_nav()
-    st.header("Financial & Servicewise Reports")
+    page_header(); render_navigation_bar(); st.header("Financial Reports")
+    report_mode = st.radio("Report Period:", ["Daily", "Weekly", "Monthly", "Custom Date Range"], horizontal=True)
+    today = date.today(); start_d, end_d = today, today
+    if report_mode == "Daily": start_d = st.date_input("Select Date", value=today); end_d = start_d
+    elif report_mode == "Weekly":
+        ref_date = st.date_input("Select a day in the target week", value=today); start_d = ref_date - timedelta(days=ref_date.weekday()); end_d = start_d + timedelta(days=6)
+    elif report_mode == "Monthly":
+        c_m, c_y = st.columns(2); sel_month = c_m.selectbox("Month", list(calendar.month_name)[1:], index=today.month-1); sel_year = c_y.number_input("Year", min_value=2020, value=today.year)
+        month_idx = list(calendar.month_name).index(sel_month); start_d = date(sel_year, month_idx, 1); end_d = date(sel_year, month_idx, calendar.monthrange(sel_year, month_idx)[1])
+    else: cs1, cs2 = st.columns(2); start_d = cs1.date_input("Start Date", value=today-timedelta(30)); end_d = cs2.date_input("End Date", value=today)
     
-    # --- FETCH DATA ---
-    df_serv = get_data("services")
-    df_trans = get_data("transactions")
+    df_trans = get_data("transactions"); df_exp = get_data("users_expenses"); df_serv = get_data("services")
+    if not df_trans.empty: 
+        df_trans['dt'] = pd.to_datetime(df_trans['date']).dt.date
+        df_trans = df_trans[(df_trans['dt'] >= start_d) & (df_trans['dt'] <= end_d)]
+    if not df_exp.empty: 
+        df_exp['dt'] = pd.to_datetime(df_exp['payment_date']).dt.date
+        df_exp = df_exp[(df_exp['dt'] >= start_d) & (df_exp['dt'] <= end_d)]
+        
+    t_inc = df_trans['amount'].sum() if not df_trans.empty else 0
+    t_exp = df_exp['amount'].sum() if not df_exp.empty else 0
+    t_net = t_inc - t_exp
+    st.divider(); c1, c2, c3 = st.columns(3); c1.metric("Period Income", f"₹ {t_inc:,.2f}"); c2.metric("Period Expenses", f"₹ {t_exp:,.2f}"); c3.metric("Net Profit", f"₹ {t_net:,.2f}")
     
-    if not df_serv.empty and not df_trans.empty:
-        # Create a container for the filter UI
-        with st.container(border=True):
-            st.markdown("### 🔍 Servicewise Filter")
-            col1, col2, col3 = st.columns([2, 1, 1])
+    st.subheader("Detailed Financial Ledger")
+    ledger_rows = []
+    if not df_trans.empty:
+        for _, r in df_trans.iterrows(): ledger_rows.append({"id": r['id'], "source": "transactions", "Date": r['dt'], "Description": r['guest_name'] or "Service Income", "Income": r['amount'], "Expenses": 0, "Type": "Income"})
+    if not df_exp.empty:
+        for _, r in df_exp.iterrows(): ledger_rows.append({"id": r['id'], "source": "users_expenses", "Date": r['dt'], "Description": r['expense_name'], "Income": 0, "Expenses": r['amount'], "Type": r['expense_type']})
+    
+    if ledger_rows:
+        ledger_df_raw = pd.DataFrame(ledger_rows).sort_values("Date")
+        ledger_df_display = ledger_df_raw.copy()
+        ledger_df_display['Date'] = ledger_df_display['Date'].apply(format_date_for_ui)
+        ledger_df_display.insert(0, 'Sl.No', range(1, len(ledger_df_display) + 1))
+        st.dataframe(ledger_df_display.drop(columns=['id', 'source']), use_container_width=True, hide_index=True)
+        
+        st.divider(); st.markdown("### 📥 Download Reports")
+        d_col1, d_col2 = st.columns(2)
+        with d_col1:
+            title_str = f"Ledger: {start_d.strftime('%d/%m/%Y')} - {end_d.strftime('%d/%m/%Y')}"
+            st.download_button("📂 Download PDF Report", generate_financial_pdf(df_trans, df_exp, title_str, t_inc, t_exp, t_net), f"Ledger_{start_d}.pdf", "application/pdf")
+        with d_col2:
+            out = io.BytesIO()
+            with pd.ExcelWriter(out, engine='xlsxwriter') as wr: 
+                ledger_df_display.drop(columns=['id', 'source']).to_excel(wr, index=False, sheet_name='Ledger')
+            st.download_button("📊 Download Excel Ledger", out.getvalue(), f"Ledger_{start_d}.xlsx")
             
-            # 1. Filter by Service Name
-            svc_options = ["All Services"] + df_serv['service_name'].tolist()
-            selected_svc = col1.selectbox("Choose Service / Pooja", svc_options)
-            
-            # 2. Date Range Pickers
-            start_date = col2.date_input("From Date", date.today() - timedelta(days=30))
-            end_date = col3.date_input("To Date", date.today())
-            
-            if st.button("Generate Servicewise Report", type="primary"):
-                # Prepare the data
-                df_trans['date_only'] = pd.to_datetime(df_trans['date']).dt.date
-                
-                # Merge transactions with services to get the names
-                report_df = df_trans.merge(df_serv, left_on='service_id', right_on='id', suffixes=('', '_master'))
-                
-                # Apply Date Filtering
-                mask = (report_df['date_only'] >= start_date) & (report_df['date_only'] <= end_date)
-                
-                # Apply Service Filtering
-                if selected_svc != "All Services":
-                    mask &= (report_df['service_name'] == selected_svc)
-                
-                final_report = report_df[mask]
+        if st.session_state.role == ADMIN_ROLE:
+            st.divider(); st.subheader("🗑️ Admin: Manage Ledger Records")
+            ledger_df_display['Selection'] = ledger_df_display.apply(lambda r: f"Sl:{r['Sl.No']} | {r['Date']} | {r['Description']} (₹{r['Income'] if r['Income']>0 else r['Expenses']})", axis=1)
+            item_to_del = st.selectbox("Select Ledger Entry to Delete", ledger_df_display['Selection'].tolist())
+            if st.button("Delete Selected Ledger Entry"):
+                sl_val = int(item_to_del.split('|')[0].replace('Sl:', '').strip())
+                row_info = ledger_df_raw.iloc[sl_val - 1]
+                run_supabase_delete(row_info['source'], row_info['id'])
+                st.success("Record deleted!"); st.rerun()
+    else: st.info("No records for this period.")
 
-                if not final_report.empty:
-                    st.divider()
-                    # Summary Cards
-                    s1, s2, s3 = st.columns(3)
-                    s1.metric("Total Collection", f"₹ {final_report['amount'].sum():,.2f}")
-                    s2.metric("Total Count", f"{len(final_report)} Bills")
-                    s3.metric("Selected Service", selected_svc)
-                    
-                    # Display Table
-                    st.markdown(f"#### Detailed Transactions for {selected_svc}")
-                    display_table = final_report[['date_only', 'guest_name', 'service_name', 'amount']].copy()
-                    display_table.columns = ['Date', 'Devotee Name', 'Service Name', 'Amount (₹)']
-                    
-                    st.dataframe(display_table, use_container_width=True, hide_index=True)
-                    
-                    # Excel Download Button
-                    st.download_button(
-                        label="📊 Download Excel Report",
-                        data=to_excel(display_table),
-                        file_name=f"Service_Report_{selected_svc}_{start_date}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-                else:
-                    st.warning(f"No records found for {selected_svc} between {start_date} and {end_date}.")
-    else:
-        st.info("Ensure you have added Services and Transactions before generating reports.")
+elif st.session_state.current_page == "Assets":
+    page_header(); render_navigation_bar(); st.header("Assets")
+    with st.form("ast_f"):
+        an = st.text_input("Asset Name"); av = st.number_input("Value")
+        if st.form_submit_button("Save"): run_supabase_insert("assets", {"asset_name": an, "value": av})
+    st.dataframe(get_data("assets"), use_container_width=True)
 
 # --- SAMAYAVAKUPPU MODULE ---
 elif st.session_state.current_page == "Samayavakuppu":
@@ -970,5 +972,4 @@ elif st.session_state.current_page == "Users":
         st.dataframe(get_data("users", "id, username, role, rights"), use_container_width=True)
 
 render_footer()
-
 
