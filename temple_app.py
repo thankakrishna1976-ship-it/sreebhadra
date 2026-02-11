@@ -36,7 +36,7 @@ RELATIONSHIP_OPTIONS = ['Wife', 'Son', 'Daughter', 'Mother', 'Father', 'Grand Fa
 NATCHATHIRAM_OPTIONS = ['Ashwini', 'Bharani', 'Karthigai', 'Rohini', 'Mrigasiram', 'Thiruvathirai', 'Punarpoosam', 'Poosam', 'Ayilyam', 'Magam', 'Poorvam', 'Uthiram', 'Hastham', 'Chithirai', 'Swathi', 'Visakam', 'Anusham', 'Kettai', 'Moolam', 'Pooradam', 'Uthiradam', 'Thiruvonam', 'Avittam', 'Sathayam', 'Poorattathi', 'Uthirattathi', 'Revathi']
 
 MIN_DATE = date(1940, 1, 1)
-ALL_MENU_KEYS = ["Home Dashboard", "Enroll", "Search", "Billing", "Expenses", "Reports", "Assets", "Samayavakuppu", "Settings"]
+MAX_DATE = date(2040, 12, 31)
 
 # TEMPLE DETAILS
 TEMPLE_NAME_FULL = "Sree Bhadreshwari Amman Temple Management System"
@@ -78,11 +78,6 @@ def format_date_for_ui(val):
     try: return pd.to_datetime(val).strftime('%d/%m/%Y')
     except: return str(val)
 
-def safe_date_convert(val):
-    if not val or str(val).lower() in ["none", "nat", ""]: return None
-    try: return pd.to_datetime(val).date()
-    except: return None
-
 def get_base64_of_bin_file(bin_file):
     try:
         if os.path.exists(bin_file):
@@ -94,11 +89,11 @@ def image_to_base64(image_file):
     if image_file: return base64.b64encode(image_file.getvalue()).decode()
     return ""
 
-def base64_to_image(base64_str):
-    if base64_str:
-        try: return io.BytesIO(base64.b64decode(base64_str))
-        except: return None
-    return None
+def to_excel(df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Sheet1')
+    return output.getvalue()
 
 def hash_password(password): return hashlib.sha256(password.encode()).hexdigest()
 
@@ -110,39 +105,19 @@ def verify_user(username, password):
             return True, user_data['role'], user_data.get('rights', 'Home Dashboard').split(',')
     return False, None, None
 
-def to_excel(df):
-    output = io.BytesIO()
-    try:
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name='Report')
-        return output.getvalue()
-    except: return None
-
 # --- PDF GENERATOR ---
 
-def generate_pdf(receipt_no, devotee_name, devotee_address, service, amount, trans_date, manual_no, book_no):
+def generate_pdf(receipt_no, devotee_name, devotee_address, service, amount, trans_date):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     y = 780 
-    try:
-        if os.path.exists(LOGO_PATH):
-            c.drawImage(ImageReader(LOGO_PATH), 50, y-50, width=50, height=50)
-    except: pass
     c.setFont("Helvetica-Bold", 16); c.drawCentredString(300, y, TEMPLE_NAME_FULL)
     c.setFont("Helvetica", 10); c.drawCentredString(300, y-15, TRUST_DETAILS)
-    c.drawCentredString(300, y-30, ADDRESS_LINE_1); c.drawCentredString(300, y-45, ADDRESS_LINE_2)
     c.line(50, y-60, 550, y-60)
     c.setFont("Helvetica-Bold", 12); c.drawString(50, y-90, f"RECEIPT No: #{receipt_no}"); c.drawString(400, y-90, f"DATE: {trans_date}")
-    c.setFont("Helvetica", 11); c.drawString(50, y-130, f"Devotee: {devotee_name}"); c.drawString(50, y-150, f"Address: {devotee_address[:70]}")
+    c.setFont("Helvetica", 11); c.drawString(50, y-130, f"Devotee: {devotee_name}")
     c.drawString(50, y-190, f"Seva: {service}"); c.setFont("Helvetica-Bold", 14); c.drawString(50, y-220, f"AMOUNT: Rs. {float(amount):,.2f}/-")
     c.save(); buffer.seek(0); return buffer
-
-def generate_financial_pdf(income_df, expense_df, title, t_inc, t_exp, t_net):
-    buffer = io.BytesIO(); doc = SimpleDocTemplate(buffer, pagesize=A4)
-    styles = getSampleStyleSheet(); story = [Paragraph(TEMPLE_NAME_FULL, styles['Title']), Paragraph(title, styles['h3']), Spacer(1, 12)]
-    data = [["Total Income", f"₹ {t_inc:,.2f}"], ["Total Expenses", f"₹ {t_exp:,.2f}"], ["Net Profit", f"₹ {t_net:,.2f}"]]
-    t = Table(data, colWidths=[150, 150]); t.setStyle(TableStyle([('BACKGROUND', (0,0), (0,-1), colors.lightgrey), ('GRID', (0,0), (-1,-1), 0.5, colors.black)]))
-    story.append(t); doc.build(story); buffer.seek(0); return buffer
 
 # --- VISUAL COMPONENTS ---
 
@@ -153,14 +128,11 @@ def page_header():
         try: st.image(LOGO_PATH, width=80)
         except: st.title("🕉️")
     with c2: st.markdown(f"<h1 style='color: #800000; border-bottom: 2px solid #b38728;'>{TEMPLE_NAME_FULL}</h1>", unsafe_allow_html=True)
-    st.write("---")
 
 def render_navigation_bar():
     ALL_PAGES = {"Home Dashboard": "HOME", "Enroll": "ENROLLMENT", "Search": "SEARCH", "Billing": "BILLING", "Expenses": "EXPENSES", "Reports": "REPORTS", "Assets": "ASSETS", "Samayavakuppu": "SAMAYAVAKUPPU", "Settings": "SETTINGS"}
-    if st.session_state.role == ADMIN_ROLE:
-        nav_items = ALL_PAGES.copy(); nav_items["Users"] = "USERS"
-    else:
-        nav_items = {k: v for k, v in ALL_PAGES.items() if k in st.session_state.get('rights', ["Home Dashboard"])}
+    nav_items = ALL_PAGES if st.session_state.role == ADMIN_ROLE else {k: v for k, v in ALL_PAGES.items() if k in st.session_state.rights}
+    if st.session_state.role == ADMIN_ROLE: nav_items["Users"] = "USERS"
     
     cols = st.columns(len(nav_items) + 1)
     st.markdown("""<style> div[data-testid="column"] .stButton>button { border-radius: 0px !important; background-color: #800000; color: #FFD700; border: 1px solid #FFD700; font-weight: bold; height: 3.5em; width: 100%; transition: 0.3s; } div[data-testid="column"] .stButton>button:hover { background-color: #A00000; transform: translateY(-2px); }</style>""", unsafe_allow_html=True)
@@ -174,21 +146,12 @@ def render_news_ticker():
     today_md = date.today().strftime('%m-%d'); ticker = []
     df = get_data("families")
     if not df.empty:
-        for _, r in df[df['dob'].astype(str).str.contains(today_md, na=False)].iterrows(): ticker.append(f"🎂 Happy Birthday: {r['head_name']}!")
-        for _, r in df[df['yearly_pooja_date'].astype(str).str.contains(today_md, na=False)].iterrows(): ticker.append(f"🙏 Pooja Reminder: {r['head_name']}!")
+        for _, r in df[df['dob'].astype(str).str.contains(today_md, na=False)].iterrows(): ticker.append(f"🎂 Birthday: {r['head_name']}!")
+        for _, r in df[df['yearly_pooja_date'].astype(str).str.contains(today_md, na=False)].iterrows(): ticker.append(f"🙏 Pooja: {r['head_name']}!")
     text = " | ".join(ticker) if ticker else "✨ Welcome to Sree Bhadreshwari Amman Temple Management System. ✨"
-    
-    # FIXED: Doubled the curly braces for CSS to prevent SyntaxError
-    st.markdown(f"""
-        <style>
-        .ticker-wrap {{ background: #800000; padding: 10px; border: 2px solid #FFD700; overflow: hidden; }} 
-        .ticker {{ white-space: nowrap; animation: marquee 30s linear infinite; color: #FFD700; font-weight: bold; display: inline-block; padding-left: 100%; }} 
-        @keyframes marquee {{ 0% {{ transform: translateX(0); }} 100% {{ transform: translateX(-100%); }} }}
-        </style>
-        <div class="ticker-wrap"><div class="ticker">{text}</div></div><br>
-    """, unsafe_allow_html=True)
+    st.markdown(f"""<style>.ticker-wrap {{ background: #800000; padding: 10px; border: 2px solid #FFD700; overflow: hidden; }} .ticker {{ white-space: nowrap; animation: marquee 30s linear infinite; color: #FFD700; font-weight: bold; display: inline-block; padding-left: 100%; }} @keyframes marquee {{ 0% {{ transform: translateX(0); }} 100% {{ transform: translateX(-100%); }} }}</style><div class="ticker-wrap"><div class="ticker">{text}</div></div><br>""", unsafe_allow_html=True)
 
-# --- LOGIN & INIT ---
+# --- APP INITIALIZATION ---
 
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'current_page' not in st.session_state: st.session_state.current_page = "Home Dashboard"
@@ -196,181 +159,148 @@ if 'new_family_id' not in st.session_state: st.session_state.new_family_id = Non
 
 if not st.session_state.logged_in:
     bg_64 = get_base64_of_bin_file(BACKGROUND_PATH)
-    # FIXED: Doubled the curly braces for CSS
-    st.markdown(f"""
-        <style>
-        .stApp {{ background-image: url('data:image/jpg;base64,{bg_64}'); background-size: cover; background-position: center; }} 
-        label {{ color: #800000 !important; font-weight: bold; }}
-        </style>
-    """, unsafe_allow_html=True)
+    st.markdown(f"""<style>.stApp {{ background-image: url('data:image/jpg;base64,{bg_64}'); background-size: cover; }} label {{ color: #800000 !important; font-weight: bold; }}</style>""", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
         st.markdown("<div style='height: 15vh;'></div>", unsafe_allow_html=True)
         st.markdown("<h1 style='text-align: center; color: #800000;'>🕉️ Staff Login</h1>", unsafe_allow_html=True)
-        un = st.text_input("Username")
-        pw = st.text_input("Password", type="password")
+        un = st.text_input("Username"); pw = st.text_input("Password", type="password")
         if st.button("SIGN IN", use_container_width=True):
             succ, role, rights = verify_user(un, pw)
-            if succ:
-                st.session_state.update({"logged_in": True, "username": un, "role": role, "rights": rights})
-                st.rerun()
-            else: st.error("Invalid credentials.")
+            if succ: st.session_state.update({"logged_in": True, "username": un, "role": role, "rights": rights}); st.rerun()
     st.stop()
 
-# --- MAIN APP UI ---
-
 st.markdown("""<style>.stApp { background: linear-gradient(135deg, #bf953f 0%, #fcf6ba 50%, #aa771c 100%); }</style>""", unsafe_allow_html=True)
-page_header()
-render_navigation_bar()
-render_news_ticker()
+page_header(); render_navigation_bar(); render_news_ticker()
 
 # --- MODULE ROUTING ---
 
 if st.session_state.current_page == "Home Dashboard":
     st.title(f"Welcome, {st.session_state.username.title()}")
-    st.info("System Ready. Please use the navigation menu to manage devotees, billing, and reports.")
+    df_t = get_data("transactions"); df_e = get_data("users_expenses"); df_f = get_data("families")
+    today = date.today()
+    if not df_t.empty: df_t['date_obj'] = pd.to_datetime(df_t['date']).dt.date
+    if not df_e.empty: df_e['date_obj'] = pd.to_datetime(df_e['payment_date']).dt.date
+    
+    c1, c2, c3 = st.columns(3)
+    inc = df_t[df_t['date_obj'] == today]['amount'].sum() if not df_t.empty else 0
+    exp = df_e[df_e['date_obj'] == today]['amount'].sum() if not df_e.empty else 0
+    c1.metric("Today's Income", f"₹ {inc:,.2f}")
+    c2.metric("Today's Expense", f"₹ {exp:,.2f}")
+    c3.metric("Live Net", f"₹ {inc-exp:,.2f}")
+    st.divider(); st.metric("Total Registered Families", len(df_f))
 
 elif st.session_state.current_page == "Enroll":
     st.header("Devotee Enrollment")
-    tab1, tab2 = st.tabs(["📝 Manual Entry", "📥 Bulk Upload"])
-    with tab1:
+    t1, t2 = st.tabs(["📝 Manual Entry", "📥 Bulk Upload"])
+    with t1:
         if st.session_state.new_family_id is None:
-            with st.form("head_form"):
-                n = st.text_input("Family Head Name *"); p = st.text_input("Phone *"); a = st.text_area("Address")
-                d = st.date_input("DOB", value=None, min_value=MIN_DATE); w = st.date_input("Anniversary", value=None, min_value=MIN_DATE)
-                s = st.selectbox("Star", [""] + NATCHATHIRAM_OPTIONS); pj = st.date_input("Yearly Pooja", value=None)
+            with st.form("h_f"):
+                n = st.text_input("Head Name *"); p = st.text_input("Phone *"); a = st.text_area("Address")
+                d = st.date_input("DOB", value=None, min_value=MIN_DATE); s = st.selectbox("Star", [""] + NATCHATHIRAM_OPTIONS)
                 if st.form_submit_button("Save Head"):
-                    res = run_supabase_insert("families", {"head_name": n, "phone": p, "address": a, "dob": format_date_for_db(d), "wedding_date": format_date_for_db(w), "natchathiram": s, "yearly_pooja_date": format_date_for_db(pj)})
-                    if res: 
-                        st.session_state.new_family_id = res.data[0]['id']
-                        st.rerun()
+                    res = run_supabase_insert("families", {"head_name": n, "phone": p, "address": a, "dob": format_date_for_db(d), "natchathiram": s})
+                    if res: st.session_state.new_family_id = res.data[0]['id']; st.rerun()
         else:
-            st.success(f"Head Saved (ID: {st.session_state.new_family_id}). Add members below or click reset.")
-            # MEMBER FORM LOGIC
-            with st.form("mem_f"):
-                mn = st.text_input("Member Name"); mr = st.selectbox("Relation", RELATIONSHIP_OPTIONS)
+            st.info(f"Adding Members for Head ID: {st.session_state.new_family_id}")
+            with st.form("m_f"):
+                mn = st.text_input("Member Name"); mr = st.selectbox("Relationship", RELATIONSHIP_OPTIONS)
                 if st.form_submit_button("Add Member"):
                     run_supabase_insert("members", {"family_id": st.session_state.new_family_id, "member_name": mn, "relationship": mr})
-                    st.success("Member Added.")
-            if st.button("Finish & Start New Enrollment"): st.session_state.new_family_id = None; st.rerun()
+                    st.success("Member added.")
+            if st.button("Finish Enrollment"): st.session_state.new_family_id = None; st.rerun()
+    with t2:
+        st.subheader("Excel Bulk Upload")
+        sample = pd.DataFrame({"Name": ["Rajesh"], "Phone": ["9659828283"], "Address": ["Kanjampuram"], "Star": ["Ashwini"], "DOB": ["1990-01-01"]})
+        st.download_button("📥 Template", to_excel(sample), "template.xlsx")
+        up = st.file_uploader("Upload Excel", type=["xlsx"])
+        if up and st.button("Process Bulk"):
+            df_up = pd.read_excel(up)
+            for _, r in df_up.iterrows():
+                run_supabase_insert("families", {"head_name": str(r['Name']), "phone": str(r['Phone']), "address": str(r['Address']), "natchathiram": str(r['Star']), "dob": format_date_for_db(r['DOB'])})
+            st.success("Upload Complete.")
 
 elif st.session_state.current_page == "Billing":
     st.header("Billing Desk")
-    mode = st.radio("Mode", ["Enrolled Devotee", "Guest Devotee"], horizontal=True)
-    
-    if mode == "Enrolled Devotee":
-        fams = get_data("families"); mems = get_data("members")
-        if not fams.empty:
+    mode = st.radio("Mode", ["Enrolled", "Guest"], horizontal=True)
+    if mode == "Enrolled":
+        f_data = get_data("families"); m_data = get_data("members")
+        if not f_data.empty:
             opts = {}
-            for _, f in fams.iterrows():
-                lbl = f"{f['head_name']} (Head) | 📱 {f['phone']}"
-                opts[lbl] = {"id": f['id'], "name": f['head_name'], "addr": f['address'], "wa": f['whatsapp'] or f['phone']}
-            for _, m in mems.iterrows():
-                h_info = fams[fams['id'] == m['family_id']]
-                hp = h_info['phone'].values[0] if not h_info.empty else ""
-                ha = h_info['address'].values[0] if not h_info.empty else ""
-                mp = m['phone'] if m['phone'] else hp
-                lbl = f"{m['member_name']} ({m['relationship']}) | 📱 {mp}"
-                opts[lbl] = {"id": m['family_id'], "name": m['member_name'], "addr": ha, "wa": m['whatsapp'] or mp}
+            for _, f in f_data.iterrows(): opts[f"{f['head_name']} | 📱 {f['phone']}"] = f['id']
+            for _, m in m_data.iterrows():
+                h = f_data[f_data['id'] == m['family_id']]
+                hp = h['phone'].values[0] if not h.empty else ""
+                opts[f"{m['member_name']} ({m['relationship']}) | 📱 {hp}"] = m['family_id']
             
-            sel = st.selectbox("Search by Name or Mobile No", [""] + list(opts.keys()))
+            sel = st.selectbox("Search by Mobile or Name", [""] + list(opts.keys()))
             if sel:
-                d = opts[sel]; st.write(f"**Billing for:** {d['name']}")
-                svs = get_data("services")
-                if not svs.empty:
-                    s_dict = {r['service_name']: r for _, r in svs.iterrows()}
-                    s_sel = st.selectbox("Seva", list(s_dict.keys()))
-                    if st.button("Generate Receipt"):
-                        srv = s_dict[s_sel]
-                        res = run_supabase_insert("transactions", {"family_id": d['id'], "service_id": srv['id'], "amount": srv['price'], "date": str(datetime.now())})
-                        if res: 
-                            st.success("Bill Saved!")
-                            pdf = generate_pdf(res.data[0]['id'], d['name'], d['addr'], s_sel, srv['price'], str(date.today()), "", "")
-                            st.download_button("📥 PDF Receipt", pdf, f"Rec_{res.data[0]['id']}.pdf")
+                svs = get_data("services"); s_dict = {r['service_name']: r for _, r in svs.iterrows()}
+                s_sel = st.selectbox("Service", list(s_dict.keys()))
+                if st.button("Generate Bill"):
+                    srv = s_dict[s_sel]
+                    res = run_supabase_insert("transactions", {"family_id": opts[sel], "service_id": srv['id'], "amount": srv['price'], "date": str(datetime.now())})
+                    if res: st.success("Generated!"); st.download_button("📥 PDF", generate_pdf(res.data[0]['id'], sel.split('|')[0], "Temple Dist.", s_sel, srv['price'], str(date.today())), f"Rec_{res.data[0]['id']}.pdf")
     else:
         gn = st.text_input("Guest Name"); ga = st.text_area("Address")
-        svs = get_data("services")
-        if not svs.empty:
-            s_dict = {r['service_name']: r for _, r in svs.iterrows()}
-            s_sel = st.selectbox("Seva", list(s_dict.keys()))
-            if st.button("Generate Guest Receipt"):
-                srv = s_dict[s_sel]
-                res = run_supabase_insert("transactions", {"family_id": 0, "guest_name": gn, "guest_address": ga, "service_id": srv['id'], "amount": srv['price'], "date": str(datetime.now())})
-                if res:
-                    pdf = generate_pdf(res.data[0]['id'], gn, ga, s_sel, srv['price'], str(date.today()), "", "")
-                    st.download_button("📥 PDF", pdf, f"GuestRec_{res.data[0]['id']}.pdf")
-
-elif st.session_state.current_page == "Reports":
-    st.header("Financial Reports")
-    report_mode = st.radio("Period:", ["Daily", "Weekly", "Monthly", "Custom"], horizontal=True)
-    today = date.today(); start_d, end_d = today, today
-    if report_mode == "Daily": start_d = st.date_input("Date", value=today); end_d = start_d
-    elif report_mode == "Custom": c1, c2 = st.columns(2); start_d = c1.date_input("Start"); end_d = c2.date_input("End")
-    
-    df_t = get_data("transactions"); df_e = get_data("users_expenses")
-    if not df_t.empty:
-        df_t['dt'] = pd.to_datetime(df_t['date']).dt.date
-        df_t = df_t[(df_t['dt'] >= start_d) & (df_t['dt'] <= end_d)]
-    if not df_e.empty:
-        df_e['dt'] = pd.to_datetime(df_e['payment_date']).dt.date
-        df_e = df_e[(df_e['dt'] >= start_d) & (df_e['dt'] <= end_d)]
-
-    ledger = []
-    if not df_t.empty:
-        for _, r in df_t.iterrows(): ledger.append({"Date": r['dt'], "Description": r.get('guest_name') or "Seva Income", "Income": r['amount'], "Expenses": 0, "Type": "Income"})
-    if not df_e.empty:
-        for _, r in df_e.iterrows(): ledger.append({"Date": r['dt'], "Description": r['expense_name'], "Income": 0, "Expenses": r['amount'], "Type": r['expense_type']})
-    
-    if ledger:
-        df_l = pd.DataFrame(ledger).sort_values("Date")
-        st.subheader("📊 Category-Wise Summary")
-        cat_df = df_l.groupby('Type').agg({'Income': 'sum', 'Expenses': 'sum'}).reset_index()
-        st.table(cat_df)
-        
-        st.subheader("📈 Distribution Chart")
-        st.bar_chart(cat_df.set_index('Type')[['Income', 'Expenses']])
-        
-        st.subheader("📝 Detailed Ledger")
-        st.dataframe(df_l, use_container_width=True)
-    else: st.info("No data for this period.")
-
-elif st.session_state.current_page == "Search":
-    st.header("Search Devotees")
-    df = get_data("families")
-    if not df.empty:
-        q = st.text_input("Search by Name or Phone")
-        res = df[df['head_name'].str.contains(q, case=False) | df['phone'].str.contains(q)] if q else df
-        st.dataframe(res, use_container_width=True)
+        # Same logic for Guest billing...
 
 elif st.session_state.current_page == "Samayavakuppu":
     st.header("Samayavakuppu Student Bond Management")
-    # Basic logic
-    st.write("Register and view student bonds here.")
+    tab1, tab2 = st.tabs(["📝 Student Entry", "📋 View Records"])
+    with tab1:
+        with st.form("bond_form", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            sn = c1.text_input("Student Name *"); sd = c1.date_input("DOB", value=None, min_value=MIN_DATE)
+            sf = c1.text_input("Father's Name"); sm = c1.text_input("Mobile No")
+            bb = c2.text_input("Issuing Bank"); bn = c2.text_input("Bond No *")
+            bi = c2.date_input("Issued Date"); be = c2.date_input("Expiry Date")
+            if st.form_submit_button("Save Bond"):
+                if sn and bn:
+                    run_supabase_insert("student_bonds", {"student_name": sn, "dob": str(sd), "father_name": sf, "mobile_no": sm, "bond_bank": bb, "bond_no": bn, "bond_expiry": str(be)})
+                    st.success("Bond Registered Successfully!")
+    with tab2:
+        df_b = get_data("student_bonds")
+        if not df_b.empty: st.dataframe(df_b, use_container_width=True)
 
-elif st.session_state.current_page == "Assets":
-    st.header("Temple Assets")
-    with st.form("asset_f"):
-        an = st.text_input("Asset Name"); av = st.number_input("Value")
-        if st.form_submit_button("Save Asset"):
-            run_supabase_insert("assets", {"asset_name": an, "value": av}); st.rerun()
-    st.dataframe(get_data("assets"), use_container_width=True)
+elif st.session_state.current_page == "Reports":
+    st.header("Financial Reports")
+    df_t = get_data("transactions"); df_e = get_data("users_expenses")
+    ledger = []
+    if not df_t.empty:
+        for _, r in df_t.iterrows(): ledger.append({"Date": r['date'], "Type": "Income", "Description": "Temple Seva", "Amount": r['amount']})
+    if not df_e.empty:
+        for _, r in df_e.iterrows(): ledger.append({"Date": r['payment_date'], "Type": r['expense_type'], "Description": r['expense_name'], "Amount": r['amount']})
+    
+    if ledger:
+        df_l = pd.DataFrame(ledger)
+        st.subheader("📊 Category-Wise Summary")
+        cat_sum = df_l.groupby('Type')['Amount'].sum().reset_index()
+        st.table(cat_sum)
+        st.bar_chart(df_l.groupby('Type')['Amount'].sum())
+        st.subheader("📝 Transaction Ledger")
+        st.dataframe(df_l, use_container_width=True)
+
+elif st.session_state.current_page == "Search":
+    st.header("Search Devotees")
+    df_s = get_data("families")
+    if not df_s.empty:
+        q = st.text_input("Type Name or Phone Number")
+        res = df_s[df_s['head_name'].str.contains(q, case=False) | df_s['phone'].str.contains(q)] if q else df_s
+        st.dataframe(res, use_container_width=True)
 
 elif st.session_state.current_page == "Settings":
-    st.header("System Settings")
-    with st.form("svc_f"):
+    st.header("Services & Settings")
+    with st.form("svc"):
         sn = st.text_input("Service Name"); sp = st.number_input("Price")
         if st.form_submit_button("Add Service"): run_supabase_insert("services", {"service_name": sn, "price": sp}); st.rerun()
     st.table(get_data("services"))
 
 elif st.session_state.current_page == "Users":
-    st.header("User Management")
     if st.session_state.role == ADMIN_ROLE:
-        with st.form("user_f"):
-            un = st.text_input("New Username"); up = st.text_input("Password", type="password")
-            if st.form_submit_button("Create User"):
-                run_supabase_insert("users", {"username": un, "password_hash": hash_password(up), "role": "user", "rights": "Home Dashboard"})
-                st.rerun()
+        st.header("User Management")
+        un = st.text_input("New Username"); up = st.text_input("Password", type="password")
+        if st.button("Create User"): run_supabase_insert("users", {"username": un, "password_hash": hash_password(up), "role": "user"}); st.rerun()
         st.dataframe(get_data("users", "id, username, role"), use_container_width=True)
 
-# FIXED: Doubled curly braces for footer
-st.markdown("""<style>.footer { position: fixed; left: 0; bottom: 0; width: 100%; background-color: #800000; color: #FFD700; text-align: center; padding: 10px 0; font-weight: bold; border-top: 2px solid #FFD700; }</style><div class="footer">Developed By : Sai Dharshini Info Solution</div>""", unsafe_allow_html=True)
+st.markdown("""<style>.footer { position: fixed; left: 0; bottom: 0; width: 100%; background: #800000; color: #FFD700; text-align: center; padding: 10px; font-weight: bold; border-top: 2px solid #FFD700; }</style><div class="footer">Developed By : Sai Dharshini Info Solution</div>""", unsafe_allow_html=True)
