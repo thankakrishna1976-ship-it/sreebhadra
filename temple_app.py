@@ -450,29 +450,10 @@ if st.session_state.current_page == "Home Dashboard":
     df_trans = get_data("transactions")
     df_exp_all = get_data("users_expenses")
     
-   if st.session_state.current_page == "Home Dashboard":
-    page_header()
-    render_navigation_bar()
-    render_news_ticker()
-    st.title(f"Welcome, {st.session_state.username.title()}")
-    
-    today = date.today()
-    start_of_week = today - timedelta(days=today.weekday())
-    start_of_month = today.replace(day=1)
-    start_of_year = today.replace(month=1, day=1)
-
-    df_trans = get_data("transactions")
-    df_exp_all = get_data("users_expenses")
-    
-    # --- FIXED INDENTATION & DATE CONVERSION ---
     if not df_trans.empty:
-        df_trans['date_obj'] = pd.to_datetime(df_trans['date'], errors='coerce').dt.date
-        df_trans = df_trans.dropna(subset=['date_obj'])
-
+        df_trans['date_obj'] = pd.to_datetime(df_trans['date']).dt.date
     if not df_exp_all.empty:
-        df_exp_all['date_obj'] = pd.to_datetime(df_exp_all['payment_date'], errors='coerce').dt.date
-        df_exp_all = df_exp_all.dropna(subset=['date_obj'])
-    # --------------------------------------------
+        df_exp_all['date_obj'] = pd.to_datetime(df_exp_all['payment_date']).dt.date
 
     def calc_finances(start_d, end_d):
         inc = 0
@@ -991,6 +972,5 @@ elif st.session_state.current_page == "Users":
         st.dataframe(get_data("users", "id, username, role, rights"), use_container_width=True)
 
 render_footer()
-
 
 
