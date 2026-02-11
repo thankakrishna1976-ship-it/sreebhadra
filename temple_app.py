@@ -450,18 +450,22 @@ if st.session_state.current_page == "Home Dashboard":
     df_trans = get_data("transactions")
     df_exp_all = get_data("users_expenses")
     
+    # --- ERROR FIX: COERCE ERRORS ON DATE CONVERSION ---
     if not df_trans.empty:
-        df_trans['date_obj'] = pd.to_datetime(df_trans['date']).dt.date
+        df_trans['date_obj'] = pd.to_datetime(df_trans['date'], errors='coerce').dt.date
     if not df_exp_all.empty:
-        df_exp_all['date_obj'] = pd.to_datetime(df_exp_all['payment_date']).dt.date
+        df_exp_all['date_obj'] = pd.to_datetime(df_exp_all['payment_date'], errors='coerce').dt.date
 
     def calc_finances(start_d, end_d):
         inc = 0
         exp = 0
         if not df_trans.empty:
-            inc = df_trans[(df_trans['date_obj'] >= start_d) & (df_trans['date_obj'] <= end_d)]['amount'].sum()
+            # Filter out NaT values before sum
+            temp_df = df_trans.dropna(subset=['date_obj'])
+            inc = temp_df[(temp_df['date_obj'] >= start_d) & (temp_df['date_obj'] <= end_d)]['amount'].sum()
         if not df_exp_all.empty:
-            exp = df_exp_all[(df_exp_all['date_obj'] >= start_d) & (df_exp_all['date_obj'] <= end_d)]['amount'].sum()
+            temp_exp = df_exp_all.dropna(subset=['date_obj'])
+            exp = temp_exp[(temp_exp['date_obj'] >= start_d) & (temp_exp['date_obj'] <= end_d)]['amount'].sum()
         return inc, exp, (inc - exp)
 
     stats = {
@@ -766,11 +770,15 @@ elif st.session_state.current_page == "Reports":
     else: cs1, cs2 = st.columns(2); start_d = cs1.date_input("Start Date", value=today-timedelta(30)); end_d = cs2.date_input("End Date", value=today)
     
     df_trans = get_data("transactions"); df_exp = get_data("users_expenses"); df_serv = get_data("services")
+    
+    # --- ERROR FIX: COERCE ERRORS ON DATE CONVERSION ---
     if not df_trans.empty: 
-        df_trans['dt'] = pd.to_datetime(df_trans['date']).dt.date
+        df_trans['dt'] = pd.to_datetime(df_trans['date'], errors='coerce').dt.date
+        df_trans = df_trans.dropna(subset=['dt']) # Clean bad dates
         df_trans = df_trans[(df_trans['dt'] >= start_d) & (df_trans['dt'] <= end_d)]
     if not df_exp.empty: 
-        df_exp['dt'] = pd.to_datetime(df_exp['payment_date']).dt.date
+        df_exp['dt'] = pd.to_datetime(df_exp['payment_date'], errors='coerce').dt.date
+        df_exp = df_exp.dropna(subset=['dt']) # Clean bad dates
         df_exp = df_exp[(df_exp['dt'] >= start_d) & (df_exp['dt'] <= end_d)]
         
     t_inc = df_trans['amount'].sum() if not df_trans.empty else 0
@@ -972,5 +980,3 @@ elif st.session_state.current_page == "Users":
         st.dataframe(get_data("users", "id, username, role, rights"), use_container_width=True)
 
 render_footer()
-
-
