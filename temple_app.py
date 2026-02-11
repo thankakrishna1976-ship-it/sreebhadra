@@ -668,21 +668,51 @@ elif st.session_state.current_page == "Billing":
         with col1:
             selected_name, selected_wa, selected_id, selected_address = "", "", 0, ""
             if billing_mode == "Enrolled Devotee":
-                f_data = get_data("families"); m_data = get_data("members")
+                f_data = get_data("families")
+                m_data = get_data("members")
+                
                 if not f_data.empty:
                     opts = {}
-                    for _, f in f_data.iterrows(): opts[f"{f['head_name']} (Head)"] = {"id": f['id'], "name": f['head_name'], "address": f['address'], "wa": f['whatsapp'] if f['whatsapp'] else f['phone']}
+                    # 1. Add Family Heads to selection list
+                    for _, f in f_data.iterrows():
+                        display_label = f"{f['head_name']} (Head) | 📱 {f['phone']}"
+                        opts[display_label] = {
+                            "id": f['id'], 
+                            "name": f['head_name'], 
+                            "address": f['address'], 
+                            "wa": f['whatsapp'] if f['whatsapp'] else f['phone']
+                        }
+                    
+                    # 2. Add Family Members to selection list
                     for _, m in m_data.iterrows():
-                        h_addr = f_data[f_data['id'] == m['family_id']]['address'].values[0] if not f_data[f_data['id'] == m['family_id']].empty else "N/A"
-                        opts[f"{m['member_name']} ({m['relationship']})"] = {"id": m['family_id'], "name": m['member_name'], "address": h_addr, "wa": m['whatsapp'] if m['whatsapp'] else (m['phone'] if m['phone'] else opts.get(f"{f_data[f_data['id'] == m['family_id']]['head_name'].values[0]} (Head)", {}).get("wa", ""))}
-                    sel_k = st.selectbox("Select Devotee", list(opts.keys())); d_obj = opts[sel_k]; selected_name, selected_id, selected_address, selected_wa = d_obj['name'], d_obj['id'], d_obj['address'], d_obj['wa']
-                else: st.warning("Enroll devotees first.")
-            else: selected_name = st.text_input("Guest Name *"); selected_address = st.text_area("Guest Address"); selected_wa = st.text_input("Guest WhatsApp No.")
-            servs = get_data("services")
-            if not servs.empty:
-                s_dict = {r['service_name']: r for _, r in servs.iterrows()}; sel_s = st.selectbox("Select Service", list(s_dict.keys())); srv = s_dict[sel_s]
-                man_no = st.text_input("Manual Bill No."); book_no = st.text_input("Bill Book No.")
-                
+                        # Get head info for address/phone fallback
+                        head_info = f_data[f_data['id'] == m['family_id']]
+                        h_addr = head_info['address'].values[0] if not head_info.empty else "N/A"
+                        h_phone = head_info['phone'].values[0] if not head_info.empty else ""
+                        
+                        # Use member's phone if available, else use head's phone
+                        m_phone = m['phone'] if m['phone'] else h_phone
+                        
+                        display_label = f"{m['member_name']} ({m['relationship']}) | 📱 {m_phone}"
+                        opts[display_label] = {
+                            "id": m['family_id'], 
+                            "name": m['member_name'], 
+                            "address": h_addr, 
+                            "wa": m['whatsapp'] if m['whatsapp'] else (m['phone'] if m['phone'] else h_phone)
+                        }
+                    
+                    # 3. Searchable Selectbox
+                    sel_k = st.selectbox("Search Devotee by Name or Mobile No", [""] + list(opts.keys()))
+                    
+                    if sel_k:
+                        d_obj = opts[sel_k]
+                        selected_name = d_obj['name']
+                        selected_id = d_obj['id']
+                        selected_address = d_obj['address']
+                        selected_wa = d_obj['wa']
+                        st.info(f"Selected: **{selected_name}** | ID: {selected_id}")
+                else:
+                    st.warning("Enroll devotees first.")
                 # --- BILL VALUE DISPLAY ---
                 st.markdown(f"<p style='font-size:14px; font-weight:bold; color:#800000;'>Bill Value: ₹ {srv['price']:,.2f}</p>", unsafe_allow_html=True)
                 
@@ -972,5 +1002,6 @@ elif st.session_state.current_page == "Users":
         st.dataframe(get_data("users", "id, username, role, rights"), use_container_width=True)
 
 render_footer()
+
 
 
