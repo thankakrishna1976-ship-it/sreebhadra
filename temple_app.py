@@ -668,51 +668,159 @@ elif st.session_state.current_page == "Billing":
         with col1:
             selected_name, selected_wa, selected_id, selected_address = "", "", 0, ""
             if billing_mode == "Enrolled Devotee":
-                f_data = get_data("families")
-                m_data = get_data("members")
-                
+                f_data = get_data("families"); m_data = get_data("members")
                 if not f_data.empty:
                     opts = {}
-                    # 1. Add Family Heads to selection list
-                    for _, f in f_data.iterrows():
-                        display_label = f"{f['head_name']} (Head) | 📱 {f['phone']}"
-                        opts[display_label] = {
-                            "id": f['id'], 
-                            "name": f['head_name'], 
-                            "address": f['address'], 
-                            "wa": f['whatsapp'] if f['whatsapp'] else f['phone']
-                        }
-                    
-                    # 2. Add Family Members to selection list
+                    for _, f in f_data.iterrows(): opts[f"{f['head_name']} (Head)"] = {"id": f['id'], "name": f['head_name'], "address": f['address'], "wa": f['whatsapp'] if f['whatsapp'] else f['phone']}
                     for _, m in m_data.iterrows():
-                        # Get head info for address/phone fallback
-                        head_info = f_data[f_data['id'] == m['family_id']]
-                        h_addr = head_info['address'].values[0] if not head_info.empty else "N/A"
-                        h_phone = head_info['phone'].values[0] if not head_info.empty else ""
-                        
-                        # Use member's phone if available, else use head's phone
-                        m_phone = m['phone'] if m['phone'] else h_phone
-                        
-                        display_label = f"{m['member_name']} ({m['relationship']}) | 📱 {m_phone}"
-                        opts[display_label] = {
-                            "id": m['family_id'], 
-                            "name": m['member_name'], 
-                            "address": h_addr, 
-                            "wa": m['whatsapp'] if m['whatsapp'] else (m['phone'] if m['phone'] else h_phone)
-                        }
-                    
-                    # 3. Searchable Selectbox
-                    sel_k = st.selectbox("Search Devotee by Name or Mobile No", [""] + list(opts.keys()))
-                    
-                    if sel_k:
-                        d_obj = opts[sel_k]
-                        selected_name = d_obj['name']
-                        selected_id = d_obj['id']
-                        selected_address = d_obj['address']
-                        selected_wa = d_obj['wa']
-                        st.info(f"Selected: **{selected_name}** | ID: {selected_id}")
-                else:
-                    st.warning("Enroll devotees first.")
+                        h_addr = f_data[f_data['id'] == m['family_id']]['address'].values[0] if not f_data[f_data['id'] == m['family_id']].empty else "N/A"
+                        opts[f"{m['member_name']} ({m['relationship']})"] = {"id": m['family_id'], "name": m['member_name'], "address": h_addr, "wa": m['whatsapp'] if m['whatsapp'] else (m['phone'] if m['phone'] else opts.get(f"{f_data[f_data['id'] == m['family_id']]['head_name'].values[0]} (Head)", {}).get("wa", ""))}
+                    sel_k = st.selectbox("Select Devotee", list(opts.keys())); d_obj = opts[sel_k]; selected_name, selected_id, selected_address, selected_wa = d_obj['name'], d_obj['id'], d_obj['address'], d_obj['wa']
+                else: st.warning("Enroll devotees first.")
+            else: selected_name = st.text_input("Guest Name *"); selected_address = st.text_area("Guest Address"); selected_wa = st.text_input("Guest WhatsApp No.")
+            servs = get_data("services")
+            if not servs.empty:
+                s_dict = {r['service_name']: r for _, r in servs.iterrows()}; sel_s = st.selectbox("Select Service", list(s_dict.keys())); srv = s_dict[sel_s]
+                man_no = st.text_input("Manual Bill No."); book_no = st.text_input("Bill Book No.")
+                
+                # --- BILL VALUE DISPLAY ---
+                st.markdown(f"<p style='font-size:14px; font-weight:bold; color:#800000;'>Bill Value: ₹ {srv['price']:,.2f}</p>", unsafe_allow_html=True)
+                
+                if st.button("Generate Receipt"):
+                    if billing_mode == "Guest Devotee" and not selected_name: st.error("Enter Name.")
+                    else:
+                        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        payload = {"family_id": selected_id, "service_id": srv['id'], "amount": srv['price'], "date": now, "manual_bill_no": man_no, "bill_book_no": book_no, "guest_name": selected_name if selected_id == 0 else "", "guest_address": selected_address, "guest_whatsapp": selected_wa}
+                        res = run_supabase_insert("transactions", payload)
+                        if res and res.data:
+                            last_id = res.data[0]['id']; pdf = generate_pdf(last_id, selected_name, selected_address, sel_s, srv['price'], now, man_no, book_no)
+                            st.success("Bill Generated!"); c_dl1, c_dl2 = st.columns(2)
+                            with c_dl1: st.download_button("📥 PDF Receipt", pdf, f"Rec_{last_id}.pdf")
+                            if selected_wa:
+                                msg = f"🙏 *{TEMPLE_NAME_FULL}*\nNamaste *{selected_name}*,\nReceipt: *#{last_id}*\nManual: *{man_no}*\nBook: *{book_no}*\nService: *{sel_s}*\nAmount: *₹{srv['price']:,.2f}*\nDate: *{now}*"
+                                encoded = msg.replace(' ', '%20').replace('\n', '%0A').replace('#', '%23').replace('*', '%2A')
+                                with c_dl2: st.link_button("📲 Send WhatsApp", f"https://wa.me/{selected_wa}?text={encoded}")
+            else: st.warning("Add services in Settings.")
+        with col2:
+            st.subheader("Last 10 Bills"); tr_history = get_data("transactions")
+            if not tr_history.empty: st.dataframe(tr_history[['id', 'amount', 'date']].sort_values('id', ascending=False).head(10), hide_index=True)
+    with bill_tab2:
+        st.subheader("Manage Bills"); tr_df = get_data("transactions"); sv_df = get_data("services")
+        if not tr_df.empty:
+            for _, r in tr_df.sort_values('id', ascending=False).iterrows():
+                with st.container():
+                    col_b1, col_b2 = st.columns([4, 1]); s_nm = sv_df[sv_df['id'] == r['service_id']]['service_name'].values[0] if not sv_df[sv_df['id'] == r['service_id']].empty else "Service"
+                    with col_b1: st.write(f"**Receipt #{r['id']}** | {r['guest_name'] if r['family_id']==0 else 'Enrolled'} | {s_nm} | ₹{r['amount']}")
+                    with col_b2:
+                        if st.session_state.role == ADMIN_ROLE:
+                            if st.button("🗑️", key=f"del_b_{r['id']}"): run_supabase_delete("transactions", r['id']); st.rerun()
+                st.divider()
+
+elif st.session_state.current_page == "Expenses":
+    page_header(); render_navigation_bar(); st.header("Expenses")
+    cat_df = get_data("expense_categories"); categories = cat_df['category_name'].tolist() if not cat_df.empty else DEFAULT_EXPENSE_TYPES
+    tab_add, tab_view, tab_bulk_ledger = st.tabs(["Record Expense", "Expense History", "Ledger Bulk Upload"])
+    with tab_add:
+        with st.form("exp_f"):
+            en = st.text_input("Title *"); et = st.selectbox("Type", categories); ea = st.number_input("Amount", min_value=0.0); ed = st.date_input("Date", value=date.today())
+            if st.form_submit_button("Record Expense"):
+                if en and ea > 0: run_supabase_insert("users_expenses", {"expense_name": en, "expense_type": et, "amount": ea, "payment_date": str(ed), "status": "Paid"}); st.success("Recorded."); st.rerun()
+    with tab_view:
+        exp_df = get_data("users_expenses")
+        if exp_df.empty: st.info("No expenses recorded yet.")
+        else:
+            st.dataframe(exp_df.sort_values('payment_date', ascending=False), use_container_width=True); st.divider(); st.subheader("Manage Expenses")
+            for _, row in exp_df.sort_values('payment_date', ascending=False).iterrows():
+                with st.container():
+                    ec1, ec2 = st.columns([4, 1])
+                    with ec1: st.write(f"**{row['expense_name']}** | {row['expense_type']} | ₹{float(row['amount']):,.2f}"); st.write(f"Date: {row['payment_date']} | Status: {row['status']}")
+                    with ec2:
+                        if st.session_state.role == ADMIN_ROLE:
+                            if st.button("🗑️", key=f"del_exp_{row['id']}"): run_supabase_delete("users_expenses", row['id']); st.rerun()
+                st.divider()
+    with tab_bulk_ledger:
+        st.subheader("Bulk Ledger Upload (Income & Expenses)")
+        sample_ledger = pd.DataFrame({"Sl.No": [1, 2], "Date": ["2024-01-01", "2024-01-02"], "Description": ["General Donation", "Pooja Supplies"], "Income": [5000, 0], "Expenses": [0, 1500], "Type": ["General", "Pooja Items"]})
+        st.download_button("📥 Download Ledger Template", to_excel(sample_ledger), "ledger_template.xlsx")
+        ledger_file = st.file_uploader("Upload Ledger Excel", type=["xlsx"])
+        if ledger_file and st.button("🚀 Process Ledger"):
+            try:
+                l_df = pd.read_excel(ledger_file, engine='openpyxl')
+                for _, row in l_df.iterrows():
+                    dt = format_date_for_db(row['Date']); desc = str(row['Description']); inc = float(row['Income'] or 0); exp = float(row['Expenses'] or 0); t = str(row['Type'])
+                    if inc > 0: run_supabase_insert("transactions", {"amount": inc, "date": f"{dt} 00:00:00", "guest_name": desc, "guest_whatsapp": "Uploaded", "family_id": 0})
+                    if exp > 0: run_supabase_insert("users_expenses", {"expense_name": desc, "expense_type": t, "amount": exp, "payment_date": dt, "status": "Paid"})
+                st.success("Ledger processed successfully!"); st.rerun()
+            except Exception as e: st.error(f"Error: {e}")
+
+elif st.session_state.current_page == "Reports":
+    page_header(); render_navigation_bar(); st.header("Financial Reports")
+    report_mode = st.radio("Report Period:", ["Daily", "Weekly", "Monthly", "Custom Date Range"], horizontal=True)
+    today = date.today(); start_d, end_d = today, today
+    if report_mode == "Daily": start_d = st.date_input("Select Date", value=today); end_d = start_d
+    elif report_mode == "Weekly":
+        ref_date = st.date_input("Select a day in the target week", value=today); start_d = ref_date - timedelta(days=ref_date.weekday()); end_d = start_d + timedelta(days=6)
+    elif report_mode == "Monthly":
+        c_m, c_y = st.columns(2); sel_month = c_m.selectbox("Month", list(calendar.month_name)[1:], index=today.month-1); sel_year = c_y.number_input("Year", min_value=2020, value=today.year)
+        month_idx = list(calendar.month_name).index(sel_month); start_d = date(sel_year, month_idx, 1); end_d = date(sel_year, month_idx, calendar.monthrange(sel_year, month_idx)[1])
+    else: cs1, cs2 = st.columns(2); start_d = cs1.date_input("Start Date", value=today-timedelta(30)); end_d = cs2.date_input("End Date", value=today)
+    
+    df_trans = get_data("transactions"); df_exp = get_data("users_expenses"); df_serv = get_data("services")
+    if not df_trans.empty: 
+        df_trans['dt'] = pd.to_datetime(df_trans['date']).dt.date
+        df_trans = df_trans[(df_trans['dt'] >= start_d) & (df_trans['dt'] <= end_d)]
+    if not df_exp.empty: 
+        df_exp['dt'] = pd.to_datetime(df_exp['payment_date']).dt.date
+        df_exp = df_exp[(df_exp['dt'] >= start_d) & (df_exp['dt'] <= end_d)]
+        
+    t_inc = df_trans['amount'].sum() if not df_trans.empty else 0
+    t_exp = df_exp['amount'].sum() if not df_exp.empty else 0
+    t_net = t_inc - t_exp
+    st.divider(); c1, c2, c3 = st.columns(3); c1.metric("Period Income", f"₹ {t_inc:,.2f}"); c2.metric("Period Expenses", f"₹ {t_exp:,.2f}"); c3.metric("Net Profit", f"₹ {t_net:,.2f}")
+    
+    st.subheader("Detailed Financial Ledger")
+    ledger_rows = []
+    if not df_trans.empty:
+        for _, r in df_trans.iterrows(): ledger_rows.append({"id": r['id'], "source": "transactions", "Date": r['dt'], "Description": r['guest_name'] or "Service Income", "Income": r['amount'], "Expenses": 0, "Type": "Income"})
+    if not df_exp.empty:
+        for _, r in df_exp.iterrows(): ledger_rows.append({"id": r['id'], "source": "users_expenses", "Date": r['dt'], "Description": r['expense_name'], "Income": 0, "Expenses": r['amount'], "Type": r['expense_type']})
+    
+    if ledger_rows:
+        ledger_df_raw = pd.DataFrame(ledger_rows).sort_values("Date")
+        ledger_df_display = ledger_df_raw.copy()
+        ledger_df_display['Date'] = ledger_df_display['Date'].apply(format_date_for_ui)
+        ledger_df_display.insert(0, 'Sl.No', range(1, len(ledger_df_display) + 1))
+        st.dataframe(ledger_df_display.drop(columns=['id', 'source']), use_container_width=True, hide_index=True)
+        
+        st.divider(); st.markdown("### 📥 Download Reports")
+        d_col1, d_col2 = st.columns(2)
+        with d_col1:
+            title_str = f"Ledger: {start_d.strftime('%d/%m/%Y')} - {end_d.strftime('%d/%m/%Y')}"
+            st.download_button("📂 Download PDF Report", generate_financial_pdf(df_trans, df_exp, title_str, t_inc, t_exp, t_net), f"Ledger_{start_d}.pdf", "application/pdf")
+        with d_col2:
+            out = io.BytesIO()
+            with pd.ExcelWriter(out, engine='xlsxwriter') as wr: 
+                ledger_df_display.drop(columns=['id', 'source']).to_excel(wr, index=False, sheet_name='Ledger')
+            st.download_button("📊 Download Excel Ledger", out.getvalue(), f"Ledger_{start_d}.xlsx")
+            
+        if st.session_state.role == ADMIN_ROLE:
+            st.divider(); st.subheader("🗑️ Admin: Manage Ledger Records")
+            ledger_df_display['Selection'] = ledger_df_display.apply(lambda r: f"Sl:{r['Sl.No']} | {r['Date']} | {r['Description']} (₹{r['Income'] if r['Income']>0 else r['Expenses']})", axis=1)
+            item_to_del = st.selectbox("Select Ledger Entry to Delete", ledger_df_display['Selection'].tolist())
+            if st.button("Delete Selected Ledger Entry"):
+                sl_val = int(item_to_del.split('|')[0].replace('Sl:', '').strip())
+                row_info = ledger_df_raw.iloc[sl_val - 1]
+                run_supabase_delete(row_info['source'], row_info['id'])
+                st.success("Record deleted!"); st.rerun()
+    else: st.info("No records for this period.")
+
+elif st.session_state.current_page == "Assets":
+    page_header(); render_navigation_bar(); st.header("Assets")
+    with st.form("ast_f"):
+        an = st.text_input("Asset Name"); av = st.number_input("Value")
+        if st.form_submit_button("Save"): run_supabase_insert("assets", {"asset_name": an, "value": av})
+    st.dataframe(get_data("assets"), use_container_width=True)
+
 # --- SAMAYAVAKUPPU MODULE ---
 elif st.session_state.current_page == "Samayavakuppu":
     page_header()
