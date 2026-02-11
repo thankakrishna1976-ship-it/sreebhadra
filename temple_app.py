@@ -450,19 +450,28 @@ if st.session_state.current_page == "Home Dashboard":
     df_trans = get_data("transactions")
     df_exp_all = get_data("users_expenses")
     
-    if not df_trans.empty:
-        df_trans['date_obj'] = pd.to_datetime(df_trans['date']).dt.date
+   if not df_trans.empty:
+        # Use errors='coerce' to prevent crashing on bad data
+        df_trans['date_obj'] = pd.to_datetime(df_trans['date'], errors='coerce').dt.date
+        # Optional: Remove rows with invalid dates so they don't break calculations
+        df_trans = df_trans.dropna(subset=['date_obj'])
+
     if not df_exp_all.empty:
-        df_exp_all['date_obj'] = pd.to_datetime(df_exp_all['payment_date']).dt.date
+        df_exp_all['date_obj'] = pd.to_datetime(df_exp_all['payment_date'], errors='coerce').dt.date
+        df_exp_all = df_exp_all.dropna(subset=['date_obj'])
 
     def calc_finances(start_d, end_d):
         inc = 0
         exp = 0
-        if not df_trans.empty:
-            inc = df_trans[(df_trans['date_obj'] >= start_d) & (df_trans['date_obj'] <= end_d)]['amount'].sum()
-        if not df_exp_all.empty:
-            exp = df_exp_all[(df_exp_all['date_obj'] >= start_d) & (df_exp_all['date_obj'] <= end_d)]['amount'].sum()
-        return inc, exp, (inc - exp)
+        if not df_trans.empty: 
+        df_trans['dt'] = pd.to_datetime(df_trans['date'], errors='coerce').dt.date
+        df_trans = df_trans.dropna(subset=['dt']) # Clean up before filtering
+        df_trans = df_trans[(df_trans['dt'] >= start_d) & (df_trans['dt'] <= end_d)]
+
+    if not df_exp.empty: 
+        df_exp['dt'] = pd.to_datetime(df_exp['payment_date'], errors='coerce').dt.date
+        df_exp = df_exp.dropna(subset=['dt']) # Clean up before filtering
+        df_exp = df_exp[(df_exp['dt'] >= start_d) & (df_exp['dt'] <= end_d)]
 
     stats = {
         "Daily": calc_finances(today, today),
@@ -972,4 +981,5 @@ elif st.session_state.current_page == "Users":
         st.dataframe(get_data("users", "id, username, role, rights"), use_container_width=True)
 
 render_footer()
+
 
